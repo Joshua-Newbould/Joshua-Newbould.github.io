@@ -170,6 +170,8 @@ const S = {
 const SPEED = 0.032; // background time per second: a steady drift
 // How often the background is re-sampled, and how far a switch's colour may drift before it
 // flips. Without a GPU ("lite") both relax, so there is less to compute and to draw.
+// While a wave is crossing, the background updates more often so its drift keeps pace on both
+// sides of the front (no lull ahead of it, none in its wake).
 const stepMs = () => (S.lite ? 900 : 500);
 const paintThreshold = () => (S.lite ? 22 : 16);
 
@@ -218,18 +220,24 @@ const mixHex = (a, b, t) => {
 const toLin = (c) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
 const fromLin = (c) => Math.round(255 * Math.min(1, Math.max(0, c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055)));
 function hexToLab(h) {
-  const [r, g, b] = hexToRgb(h).map(toLin);
+  return rgbToLab(...hexToRgb(h));
+}
+function rgbToLab(r8, g8, b8) {
+  const r = toLin(r8);
+  const g = toLin(g8);
+  const b = toLin(b8);
   const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
   const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
   const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
   return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
 }
-function labToHex([L, A, B]) {
+function labToRgb(L, A, B) {
   const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
   const m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
   const s = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
-  return rgbHex(fromLin(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s), fromLin(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s), fromLin(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s));
+  return [fromLin(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s), fromLin(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s), fromLin(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s)];
 }
+const labToHex = ([L, A, B]) => rgbHex(...labToRgb(L, A, B));
 const mixLab = (a, b, t) => {
   const p = hexToLab(a);
   const q = hexToLab(b);
@@ -278,17 +286,39 @@ function rememberPaint(c, stagger = false) {
   c.r = S.frame.rgb[k];
   c.g = S.frame.rgb[k + 1];
   c.b = S.frame.rgb[k + 2];
-  if (!stagger) return;
-  // After a transition every switch shows exactly the current colours, so none would be due to
-  // drift until all of them were at once (a lull, then a burst). Remember a colour a random
-  // distance off instead: the drift carries on, spread out, straight away.
-  const r = paintThreshold() * 0.9 * Math.sqrt(rand());
-  const u = rand() * 2 - 1;
-  const a = rand() * Math.PI * 2;
-  const v = Math.sqrt(1 - u * u);
-  c.r += r * v * Math.cos(a);
-  c.g += r * v * Math.sin(a);
-  c.b += r * u;
+  if (stagger) staggerMemory(c, k);
+}
+
+/**
+ * After a transition every switch shows exactly the current colour, so none would be due to
+ * flip again until they all were at once. In steady drift each switch is anywhere between
+ * "just flipped" and "about to": set its remembered colour a uniformly random fraction of the
+ * flip threshold behind, along the way its colour is moving, so the drift carries on unbroken.
+ */
+function staggerMemory(c, k) {
+  const ago = recentPast();
+  let dr = c.r - ago[k];
+  let dg = c.g - ago[k + 1];
+  let db = c.b - ago[k + 2];
+  let len = Math.hypot(dr, dg, db);
+  if (len < 1) {
+    // (barely moving here: any direction will do)
+    [dr, dg, db] = [rand() - 0.5, rand() - 0.5, rand() - 0.5];
+    len = Math.hypot(dr, dg, db) || 1;
+  }
+  const back = (rand() * paintThreshold()) / len;
+  c.r -= dr * back;
+  c.g -= dg * back;
+  c.b -= db * back;
+}
+/** The background as it was a little while ago (about one switch's time between drift flips). */
+function recentPast() {
+  const key = `${S.pt.toFixed(4)}|${scheme().name}|${S.dark}|${look.palette}|${paint.mode}`;
+  if (recentPast.key !== key) {
+    recentPast.key = key;
+    recentPast.rgb = paint.frame(S.pt - 0.1, scheme()).rgb;
+  }
+  return recentPast.rgb;
 }
 
 /** Bring switches up to date. `how(i, face)` returns flip options, or null to switch at once.
@@ -299,6 +329,12 @@ function retarget(indices, how, force = null) {
     const abs = faceAt(i);
     const key = abs ? abs.key : pk;
     const c = board.cells[i];
+    // Background staying background while a sweep crosses the board: the sweep moves it on.
+    if (S.sweep && !abs && c.key?.startsWith('paint:')) {
+      c.key = key;
+      c.abs = abs;
+      continue;
+    }
     if (c.key === key && !(force && force(i))) continue;
     c.key = key;
     c.abs = abs;
@@ -1181,8 +1217,12 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
     }
     for (const i of added) before.add(i);
   }
-  // Lay out the next screen invisibly and slice its changing boxes.
+  // Lay out the next screen invisibly and slice its changing boxes. Its colours sweep across
+  // the background from this moment (see startSweep), in step with the switches' wave.
+  const sweepFrom = scheme();
+  const gapFrom = board.gapColor;
   apply();
+  if (!samePage) startSweep(sweepFrom, motionField(look.motion, dir, origin), 100, gapFrom);
   const boxes = waveBoxes(S.key, fromNothing ? null : fromKey);
   for (const el of boxes) el.style.opacity = '0';
   layoutWeb();
@@ -1237,8 +1277,9 @@ function finishWeb() {
   S.overlay = null;
   layoutWeb();
   resetEdges();
-  // Every switch settles at once (nothing left half-flipped), in this theme's gutter.
-  for (const c of board.cells) c.gap = null;
+  // Every switch settles at once (nothing left half-flipped), in this theme's gutter (unless a
+  // sweep is still crossing the board: it hands the gutters over as it goes).
+  if (!S.sweep) for (const c of board.cells) c.gap = null;
   // Only switches still showing (or on their way to) a piece of a card are settled at once;
   // background switches already drifting again are left to finish their flips.
   const onCard = (i) => {
@@ -1282,7 +1323,6 @@ function go(key, { dir = 1, push = true, origin = null } = {}) {
       if (themeWanted()) applyTheme(S.wantDark); // a theme switch cut short rides this wave
       syncDom();
       S.frame = paint.frame(S.pt, scheme());
-      S.lastStep = performance.now();
       keepFocus(from);
     },
     { dir, toKey: key, origin },
@@ -1363,7 +1403,6 @@ function applyTheme(dark) {
   board.gapColor = gutter(S.dark, look, S.key);
   shadeBoard();
   S.frame = paint.frame(S.pt, scheme());
-  S.lastStep = performance.now();
 }
 
 /** Every click counts: a click mid-ripple turns it round from wherever the switches are. */
@@ -1419,7 +1458,10 @@ async function switchTheme(dark, preShots = null, from = liveSwitch()) {
     else S.overlay = null;
   }
   if (dark === S.dark) return finishWeb();
+  const sweepFrom = scheme();
+  const gapFrom = board.gapColor;
   applyTheme(dark);
+  startSweep(sweepFrom, motionField('ripple', 1, origin), 70, gapFrom); // the background ripples into the new theme
   syncDom();
 
   const BLENDS = [0.5];
@@ -1496,6 +1538,7 @@ async function switchTheme(dark, preShots = null, from = liveSwitch()) {
 function paintStep(now) {
   S.lastStep = now;
   S.frame = paint.frame(S.pt, scheme());
+  if (S.sweep) return; // (while a sweep crosses the board it moves the background on: sweepStep)
   const rgb = S.frame.rgb;
   const th2 = paintThreshold() ** 2;
   for (const c of board.cells) {
@@ -1506,8 +1549,88 @@ function paintStep(now) {
     const db = rgb[k + 2] - c.b;
     if (dr * dr + dg * dg + db * db > th2) {
       rememberPaint(c);
-      board.flip(c, concrete(null, c.i), { delay: rand() * stepMs(), dur: 440 + rand() * 240 });
+      board.flip(c, concrete(null, c.i), { delay: rand() * 500, dur: 440 + rand() * 240 }); // (spread evenly)
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sweeps: a page change, theme change or pulse doesn't re-flip the background. The background
+// is one continuous moving map; the change is a front crossing that map, with the old colours
+// ahead of it, the new behind, and a soft blend in between. Each switch keeps flipping as its
+// colour drifts, so the wave is simply where the colours change fastest, and the background
+// never pauses. (The gutter changes as the front passes, so every switch turns over there.)
+
+const SWEEP_BAND = 260; // ms the blend takes to pass a point
+
+function startSweep(from, field, lag, gapFrom) {
+  if (reduce.matches) return;
+  const n = board.cells.length;
+  const tau = new Float32Array(n);
+  let last = 0;
+  for (let i = 0; i < n; i++) {
+    tau[i] = field.tau(...cellCentre(i)) + rand() * 25;
+    last = Math.max(last, tau[i]);
+  }
+  // Switches keep their own gutter until the front reaches them.
+  for (const c of board.cells) c.gap = c.gap || gapFrom;
+  S.sweep = { from, to: scheme(), t0: performance.now(), lag, tau, end: lag + last + SWEEP_BAND + 60, gapTo: board.gapColor, at: -Infinity };
+}
+
+function sweepStep(now) {
+  const sw = S.sweep;
+  // The two maps, refreshed as the pattern moves (in OKLab, so blends never dip through grey).
+  // (Without a GPU the maps are computed in JavaScript: the old one once, the new one less often.)
+  if (now - sw.at > (S.lite ? 600 : 120)) {
+    sw.at = now;
+    const toLab = (rgb) => {
+      const out = new Float32Array(rgb.length);
+      for (let k = 0; k < rgb.length; k += 3) {
+        const v = rgbToLab(rgb[k], rgb[k + 1], rgb[k + 2]);
+        out[k] = v[0];
+        out[k + 1] = v[1];
+        out[k + 2] = v[2];
+      }
+      return out;
+    };
+    S.frame = paint.frame(S.pt, sw.to);
+    if (!sw.a || !S.lite) sw.a = toLab(paint.frame(S.pt, sw.from).rgb);
+    sw.b = toLab(S.frame.rgb);
+  }
+  const el = now - sw.t0 - sw.lag;
+  const th = paintThreshold();
+  for (const c of board.cells) {
+    // (A switch mid-flip finishes first; one only waiting to drift can be taken by the front.)
+    if (!isPaint(c.abs) || c.anim) continue;
+    const i = c.i;
+    const k = i * 3;
+    const x = Math.min(1, Math.max(0, (el - sw.tau[i]) / SWEEP_BAND));
+    const w = x * x * (3 - 2 * x);
+    const inBand = x > 0 && x < 1;
+    const [r, g, b] = labToRgb(sw.a[k] + (sw.b[k] - sw.a[k]) * w, sw.a[k + 1] + (sw.b[k + 1] - sw.a[k + 1]) * w, sw.a[k + 2] + (sw.b[k + 2] - sw.a[k + 2]) * w);
+    const d2 = (r - c.r) ** 2 + (g - c.g) ** 2 + (b - c.b) ** 2;
+    const regap = w >= 0.5 && c.gap && c.gap !== sw.gapTo;
+    if (c.q.length && !inBand && !regap) continue; // (already due to drift)
+    // In the band the colours move fast: a coarser step keeps it to one or two flips.
+    if (d2 > (inBand ? 1.5 * th : th) ** 2 || regap) {
+      c.r = r;
+      c.g = g;
+      c.b = b;
+      const atFront = inBand || regap;
+      // (Ahead of the front, drift flips are kept short so the front never waits on one; behind
+      // it they are the ordinary drift, so handing back to paintStep shows no seam.)
+      const drift = x === 0 ? { delay: rand() * 250, dur: 320 + rand() * 120 } : { delay: rand() * 500, dur: 440 + rand() * 240 };
+      board.flip(c, solid(rgbHex(r, g, b)), atFront ? { dur: FLIP_DUR, gap: w >= 0.5 ? sw.gapTo : null } : drift);
+      // Every switch turns over at the front; leave each a random way towards its next drift
+      // flip (as in steady drift), so they don't all come due again together.
+      if (atFront && w >= 0.5) staggerMemory(c, k);
+    }
+  }
+  if (el > sw.end) {
+    S.sweep = null;
+    for (const c of board.cells) c.gap = null;
+    board.redrawAll();
+    paintStep(now); // the ordinary drift carries straight on
   }
 }
 
@@ -1882,23 +2005,12 @@ function switchCards() {
 function pulseCombo(origin) {
   const page = S.key;
   const n = COMBOS[page]?.length || 1;
+  const sweepFrom = scheme();
+  const gapFrom = board.gapColor;
   setCombo(page, (comboOf(page) + 1) % n);
   applyColours();
   retintGutter();
-  S.frame = paint.frame(S.pt, scheme());
-  S.lastStep = performance.now();
-  const field = motionField('ripple', 1, origin);
-  retarget(allCells(), (i, to) => {
-    const a = faceColour(board.cells[i].cur);
-    const b = faceColour(to);
-    return {
-      delay: 40 + field.tau(...cellCentre(i)) + rand() * 25,
-      dur: FLIP_DUR,
-      steps: a && b && a !== b ? [solid(mixLch(a, b, 0.62))] : null,
-      stepDur: FLIP_STEP,
-      gap: board.gapColor,
-    };
-  });
+  startSweep(sweepFrom, motionField('ripple', 1, origin), 40, gapFrom);
   schedulePrefetch();
 }
 
@@ -1928,6 +2040,10 @@ function loop(now) {
   if (S.lastNow) S.pt += (Math.min(now - S.lastNow, 250) / 1000) * SPEED;
   S.lastNow = now;
   if (!reduce.matches && now - S.lastStep >= stepMs()) paintStep(now);
+  if (S.sweep && now - (S.sweepAt || 0) >= (S.lite ? 70 : 34)) {
+    S.sweepAt = now;
+    sweepStep(now);
+  }
   watchFrames(now);
   const b = S.brush;
   if (b && b.painting && b.last >= 0 && now - b.lastSplash >= RESPLASH_MS) {
