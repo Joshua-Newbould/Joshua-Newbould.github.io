@@ -31,7 +31,7 @@ JavaScript read it directly.
 
 ## Design options
 
-Six design decisions have two or three variations each, defined in `js/design.js`:
+Each design decision has a default and two alternatives, defined in `js/design.js`:
 
 | Decision | Options (default first) |
 | --- | --- |
@@ -40,14 +40,18 @@ Six design decisions have two or three variations each, defined in `js/design.js
 | Header & footer | Hairline · Floating · Frame |
 | Display type | Space Grotesk · Inter Tight · Chakra Petch |
 | Transition | Sweep · Ripple · Cascade |
-| Sections | Window · Plain (also on the temporary square button in the header) |
+| Sections | Window · Plain · Console (also on the temporary square button in the header) |
+| Switch flip | Fall · Turn · Roll (also on the temporary Flip button in the footer) |
 
 Press **D** (or open `?design`) for a panel to switch them live, or set them in the URL, e.g.
 `?palette=graphite&bg=contour&chrome=frame&font=chakra&motion=ripple&card=plain`. The choice is
 remembered in the browser. To settle on one for good, change `DEFAULT_LOOK` in `js/design.js`.
 
+With the Mineral palette each page also has three colour combos (`COMBOS`): turn on Pulse in the
+footer and click the background to ripple into the next one.
+
 Colours are built in OKLCH, so lightness and colourfulness stay even across each page's hue
-(About apricot, Research periwinkle, Publications lavender, Contact sea green), held in a soft band
+(by default About apricot, Research indigo, Publications fuchsia, Contact lagoon), held in a soft band
 of lightness in both themes; the title screen is cool silver and white.
 
 ## How it works
