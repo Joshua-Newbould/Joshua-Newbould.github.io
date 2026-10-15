@@ -910,6 +910,25 @@ html.brush-on main section {
 .js[data-vp~="short"] main section.later .w-big {
   display: none;
 }
+/* Short screens (phones on their side): every pixel of height counts. The window strip is
+   slimmer, its status line gives way to the part controls, and the strip (or the nav) names
+   the page instead of the big title. */
+.js[data-vp~="short"][data-card="window"] main .w-big,
+.js[data-vp~="short"][data-card="window"] main [data-strip] {
+  display: none;
+}
+.js[data-vp~="short"][data-card="window"] .w-bar {
+  height: 22px;
+}
+.js[data-vp~="short"][data-card="window"] main .w-statusline {
+  display: none;
+}
+.js[data-card="window"][data-vp~="short"] main section[data-page] {
+  padding-bottom: 14px;
+}
+.js[data-card="window"][data-vp~="short"] main section[data-page].paged {
+  padding-bottom: 40px;
+}
 /* (Specific enough to win over the phone and short-screen paddings.) */
 .js[data-vp] main section[data-page].paged {
   padding-bottom: 52px;

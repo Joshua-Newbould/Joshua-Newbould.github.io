@@ -471,7 +471,7 @@ function fitCard(pg, fits, cap, room, phone) {
     return true;
   };
   let done = false;
-  for (const z of [1, 0.92, 0.85, 0.78, 0.72]) {
+  for (const z of [1, 0.92, 0.85, 0.78, 0.72, 0.66, 0.6]) {
     inner.style.zoom = String(base * z);
     pg.parts = [pg.units];
     pg.part = 0;
@@ -1567,7 +1567,9 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 // On the sections a press-and-hold (or drag) paints too; clicks on links and buttons work as usual.
 source.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0 || !e.isPrimary || e.target.closest('a, button')) return;
+  if (e.button !== 0 || !e.isPrimary || e.target.closest('button')) return;
+  // Links work as usual, except that a touch on a card with parts may also be a flick.
+  if (e.target.closest('a') && (e.pointerType === 'mouse' || !e.target.closest('section.paged'))) return;
   if (S.key === 'intro') return enter({ x: e.clientX, y: e.clientY });
   startBrush(e);
 });
