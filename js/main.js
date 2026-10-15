@@ -313,7 +313,8 @@ function staggerMemory(c, k) {
 }
 /** The background as it was a little while ago (about one switch's time between drift flips). */
 function recentPast() {
-  const key = `${S.pt.toFixed(4)}|${scheme().name}|${S.dark}|${look.palette}|${paint.mode}`;
+  // (One frame per slice of pattern time is plenty for this, and recomputing it every frame is costly.)
+  const key = `${Math.round(S.pt / 0.015)}|${scheme().name}|${S.dark}|${look.palette}|${paint.mode}`;
   if (recentPast.key !== key) {
     recentPast.key = key;
     recentPast.rgb = paint.frame(S.pt - 0.1, scheme()).rgb;
@@ -1221,8 +1222,9 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
   // the background from this moment (see startSweep), in step with the switches' wave.
   const sweepFrom = scheme();
   const gapFrom = board.gapColor;
+  const fromFrame = S.frame;
   apply();
-  if (!samePage) startSweep(sweepFrom, motionField(look.motion, dir, origin), 100, gapFrom);
+  if (!samePage) startSweep(sweepFrom, motionField(look.motion, dir, origin), 100 - SWEEP_BAND / 2, gapFrom, fromFrame); // (half-way through its blend as the cards flip)
   const boxes = waveBoxes(S.key, fromNothing ? null : fromKey);
   for (const el of boxes) el.style.opacity = '0';
   layoutWeb();
@@ -1460,8 +1462,9 @@ async function switchTheme(dark, preShots = null, from = liveSwitch()) {
   if (dark === S.dark) return finishWeb();
   const sweepFrom = scheme();
   const gapFrom = board.gapColor;
+  const fromFrame = S.frame;
   applyTheme(dark);
-  startSweep(sweepFrom, motionField('ripple', 1, origin), 70, gapFrom); // the background ripples into the new theme
+  startSweep(sweepFrom, motionField('ripple', 1, origin), 70 - SWEEP_BAND / 2, gapFrom, fromFrame); // the background ripples into the new theme
   syncDom();
 
   const BLENDS = [0.5];
@@ -1563,7 +1566,7 @@ function paintStep(now) {
 
 const SWEEP_BAND = 260; // ms the blend takes to pass a point
 
-function startSweep(from, field, lag, gapFrom) {
+function startSweep(from, field, lag, gapFrom, fromFrame = null) {
   if (reduce.matches) return;
   const n = board.cells.length;
   const tau = new Float32Array(n);
@@ -1574,7 +1577,9 @@ function startSweep(from, field, lag, gapFrom) {
   }
   // Switches keep their own gutter until the front reaches them.
   for (const c of board.cells) c.gap = c.gap || gapFrom;
-  S.sweep = { from, to: scheme(), t0: performance.now(), lag, tau, end: lag + last + SWEEP_BAND + 60, gapTo: board.gapColor, at: -Infinity };
+  // (The maps it starts from are the frame the board was showing and the one just computed for
+  // the new colours, so starting a sweep computes nothing new.)
+  S.sweep = { from, to: scheme(), t0: performance.now(), lag, tau, end: lag + last + SWEEP_BAND + 60, gapTo: board.gapColor, at: -Infinity, fromRgb: fromFrame?.rgb, toRgb: S.frame?.rgb };
 }
 
 function sweepStep(now) {
@@ -1593,9 +1598,10 @@ function sweepStep(now) {
       }
       return out;
     };
-    S.frame = paint.frame(S.pt, sw.to);
-    if (!sw.a || !S.lite) sw.a = toLab(paint.frame(S.pt, sw.from).rgb);
-    sw.b = toLab(S.frame.rgb);
+    const first = !sw.b;
+    if (!first) S.frame = paint.frame(S.pt, sw.to);
+    if (!sw.a || !S.lite) sw.a = toLab(first && sw.fromRgb ? sw.fromRgb : paint.frame(S.pt, sw.from).rgb);
+    sw.b = toLab(first && sw.toRgb ? sw.toRgb : S.frame.rgb);
   }
   const el = now - sw.t0 - sw.lag;
   const th = paintThreshold();
@@ -2007,10 +2013,12 @@ function pulseCombo(origin) {
   const n = COMBOS[page]?.length || 1;
   const sweepFrom = scheme();
   const gapFrom = board.gapColor;
+  const fromFrame = S.frame;
   setCombo(page, (comboOf(page) + 1) % n);
   applyColours();
   retintGutter();
-  startSweep(sweepFrom, motionField('ripple', 1, origin), 40, gapFrom);
+  S.frame = paint.frame(S.pt, scheme());
+  startSweep(sweepFrom, motionField('ripple', 1, origin), -SWEEP_BAND / 2, gapFrom, fromFrame);
   schedulePrefetch();
 }
 

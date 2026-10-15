@@ -327,17 +327,23 @@ export class Paint {
       return { c, h: 0.3 * ridge + 0.1 * Math.hypot(rx, ry) };
     };
     const { cols, rows } = this;
-    const lit = relief > 0 && cols * rows <= 1400;
+    const lit = false; // (the lighting would need two more samples per flap: too costly without a GPU)
     const W = cols * this.cwCss;
     const H = rows * this.chCss || 1;
     const k = 0.95 / H;
     const ll = Math.hypot(-0.5, 0.62, 0.72);
     const [lx, ly, lz] = [-0.5 / ll, 0.62 / ll, 0.72 / ll];
     const hl = Math.hypot(lx, ly, lz + 1);
+    // The pattern is smooth and large: on a big board, compute every second switch each way and
+    // fill in between (a quarter of the work).
+    const step = cols * rows > 500 ? 2 : 1;
+    const on = (n, last) => n % step === 0 || n === last;
     for (let row = 0; row < rows; row++) {
+      if (!on(row, rows - 1)) continue;
       // Same coordinates as the shader (whose y runs bottom-up).
       const y = ((rows - row - 0.5) * this.chCss - H / 2) * k;
       for (let col = 0; col < cols; col++) {
+        if (!on(col, cols - 1)) continue;
         const x = ((col + 0.5) * this.cwCss - W / 2) * k;
         const { c, h } = field(x, y);
         let out = c;
@@ -357,6 +363,23 @@ export class Paint {
         }
         const o = (row * cols + col) * 3;
         for (let n = 0; n < 3; n++) rgb[o + n] = Math.min(1, out[n]) * 255;
+      }
+    }
+    if (step > 1) {
+      // Fill in: along the computed rows first, then down the columns between them.
+      const lerp = (o, a, b, t) => {
+        for (let n = 0; n < 3; n++) rgb[o + n] = rgb[a + n] + (rgb[b + n] - rgb[a + n]) * t;
+      };
+      for (let row = 0; row < rows; row++) {
+        if (!on(row, rows - 1)) continue;
+        for (let col = 1; col < cols - 1; col += 2) {
+          if (on(col, cols - 1)) continue;
+          lerp((row * cols + col) * 3, (row * cols + col - 1) * 3, (row * cols + col + 1) * 3, 0.5);
+        }
+      }
+      for (let row = 1; row < rows - 1; row++) {
+        if (on(row, rows - 1)) continue;
+        for (let col = 0; col < cols; col++) lerp((row * cols + col) * 3, ((row - 1) * cols + col) * 3, ((row + 1) * cols + col) * 3, 0.5);
       }
     }
   }
