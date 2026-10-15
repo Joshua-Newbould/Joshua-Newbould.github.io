@@ -318,7 +318,8 @@ body {
   gap: 10px;
   flex-shrink: 0;
 }
-#brush-toggle {
+#brush-toggle,
+#card-toggle {
   display: grid;
   place-items: center;
   width: 26px;
@@ -328,7 +329,8 @@ body {
   box-shadow: inset 0 0 0 1px var(--line);
   color: var(--muted);
 }
-#brush-toggle svg {
+#brush-toggle svg,
+#card-toggle svg {
   width: 14px;
   height: 14px;
 }
@@ -338,23 +340,32 @@ body {
   stroke-width: 1.6;
   stroke-linecap: round;
 }
+#card-toggle svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+}
 #brush-toggle .bt-tip {
   fill: currentColor;
 }
-#brush-toggle:hover {
+#brush-toggle:hover,
+#card-toggle:hover {
   color: var(--text);
 }
-#brush-toggle[aria-pressed="true"] {
+#brush-toggle[aria-pressed="true"],
+#card-toggle[aria-pressed="true"] {
   background: var(--text);
   color: var(--surface);
   box-shadow: none;
 }
-#brush-toggle:focus-visible {
+#brush-toggle:focus-visible,
+#card-toggle:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 @media (prefers-reduced-motion: no-preference) {
-  #brush-toggle {
+  #brush-toggle,
+  #card-toggle {
     transition: background 0.2s, color 0.2s;
   }
 }
@@ -428,8 +439,10 @@ html.brush-on main section {
 /* ---------- Page cards ---------- */
 
 .js main section[data-page] {
-  overflow: hidden; /* contents scale down to fit (see the script); pages never scroll */
-  padding: 30px 40px;
+  --pad-y: 30px;
+  --pad-x: 40px;
+  overflow: hidden; /* contents fit or split into parts (see the script); pages never scroll */
+  padding: var(--pad-y) var(--pad-x);
   background: var(--surface);
 }
 .w-fit {
@@ -637,6 +650,88 @@ html.brush-on main section {
   text-align: center;
 }
 
+/* ---------- Sections as windows ----------
+   A quiet nod to a ship's terminal: a hairline frame, a slim title strip (status light, path,
+   four short stripes in the page's colours) and a status line along the bottom. */
+
+.w-bar,
+.w-statusline {
+  display: none;
+}
+.js[data-card="window"] main section[data-page] {
+  padding-top: 0;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.js[data-card="window"][data-vp] main section[data-page] {
+  padding-bottom: 50px;
+}
+.js[data-card="window"] .w-index {
+  display: none; /* the title strip says where you are */
+}
+.js[data-card="window"] .w-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  margin: 0 calc(-1 * var(--pad-x)) calc(var(--pad-y) - 4px);
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--text) 4%, var(--surface));
+  font: 500 10px/1 var(--mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.w-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.w-path b {
+  font-weight: 600;
+  color: var(--text);
+}
+.w-stripes {
+  display: flex;
+  gap: 3px;
+  margin-left: auto;
+}
+.w-stripes i {
+  width: 14px;
+  height: 4px;
+  background: var(--st1);
+}
+.w-stripes i:nth-child(2) {
+  background: var(--st2);
+}
+.w-stripes i:nth-child(3) {
+  background: var(--st3);
+}
+.w-stripes i:nth-child(4) {
+  background: var(--st4);
+}
+.js[data-card="window"] .w-statusline {
+  position: absolute;
+  left: var(--pad-x);
+  bottom: 19px;
+  display: flex;
+  gap: 18px;
+  font: 500 9.5px/1 var(--mono);
+  letter-spacing: 0.2em;
+  color: var(--muted);
+  opacity: 0.8;
+  white-space: nowrap;
+}
+.js[data-card="window"] main section.paged .w-pager {
+  bottom: 10px;
+}
+.js[data-card="window"][data-vp~="phone"] .w-statusline span + span {
+  display: none; /* phones: just the section number */
+}
+
 /* ---------- Layers ---------- */
 
 /* Card shadows: two layers, so the old one can leave and the new one arrive with the wave.
@@ -777,7 +872,8 @@ html.brush-on main section {
 }
 
 .js[data-vp~="short"] main section[data-page] {
-  padding: 18px 26px;
+  --pad-y: 18px;
+  --pad-x: 26px;
 }
 /* A card too tall for the screen is split into parts (see fitCard): numbered, with controls in
    its bottom-right corner, flipped through like pages. The page itself never scrolls. */
@@ -827,7 +923,8 @@ html.brush-on main section {
   padding: 0 16px;
 }
 .js[data-vp~="phone"] main section[data-page] {
-  padding: 20px 18px;
+  --pad-y: 16px;
+  --pad-x: 16px;
 }
 .js[data-vp~="phone"] #publications li {
   grid-template-columns: 1fr;
@@ -857,6 +954,7 @@ html:not(.js) #board,
 html:not(.js) #enter,
 html:not(.js) #theme-toggle,
 html:not(.js) #brush-toggle,
+html:not(.js) #card-toggle,
 html:not(.js) .foot-nav {
   display: none;
 }

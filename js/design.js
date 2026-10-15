@@ -9,9 +9,10 @@ export const DECISIONS = {
   chrome: { label: 'Header & footer', options: { hairline: 'Hairline', floating: 'Floating', frame: 'Frame' } },
   font: { label: 'Display type', options: { grotesk: 'Space Grotesk', inter: 'Inter Tight', chakra: 'Chakra Petch' } },
   motion: { label: 'Transition', options: { sweep: 'Sweep', ripple: 'Ripple', cascade: 'Cascade' } },
+  card: { label: 'Sections', options: { window: 'Window', plain: 'Plain' } },
 };
 
-export const DEFAULT_LOOK = { palette: 'mineral', bg: 'silk', chrome: 'hairline', font: 'grotesk', motion: 'sweep' };
+export const DEFAULT_LOOK = { palette: 'mineral', bg: 'silk', chrome: 'hairline', font: 'grotesk', motion: 'sweep', card: 'window' };
 
 const valid = (k, v) => DECISIONS[k] && Object.hasOwn(DECISIONS[k].options, v);
 

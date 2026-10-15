@@ -37,6 +37,7 @@ const pages = $$('[data-page]').map((el, i) => ({
 const nav = $$('#site-nav a').map((a) => ({ el: a, id: a.getAttribute('href').slice(1) }));
 const themeToggle = $('#theme-toggle');
 const brushToggle = $('#brush-toggle');
+const cardToggle = $('#card-toggle');
 const prevBtn = $('[data-board="prev"]');
 const nextBtn = $('[data-board="next"]');
 
@@ -75,6 +76,17 @@ for (const pg of pages) {
     '<button type="button" class="pg-next" aria-label="Next part"><svg class="arr" aria-hidden="true" viewBox="0 0 12 8"><path d="m8 1 3 3-3 3M11 4H1"/></svg></button>';
   el.append(pager);
   pg.pager = pager;
+  // The window style's title strip and status line (hidden in the plain style).
+  const bar = document.createElement('div');
+  bar.className = 'w-bar';
+  bar.setAttribute('aria-hidden', 'true');
+  bar.innerHTML = `<span class="w-dot"></span><span class="w-path">JN://<b>${pg.id}</b></span><span class="w-stripes"><i></i><i></i><i></i><i></i></span>`;
+  el.prepend(bar);
+  const status = document.createElement('div');
+  status.className = 'w-statusline';
+  status.setAttribute('aria-hidden', 'true');
+  status.innerHTML = `<span>SEC ${pg.num}/${String(pages.length).padStart(2, '0')}</span><span>54.78°N 01.58°W</span>`;
+  el.append(status);
 }
 
 /** Show one part of a card (all of it when it fits in one). */
@@ -142,6 +154,7 @@ function applyLook() {
   const root = document.documentElement;
   root.dataset.font = look.font;
   root.dataset.chrome = look.chrome;
+  root.dataset.card = look.card;
   root.dataset.theme = S.dark ? 'dark' : 'light';
   paint.mode = bgMode(look);
 }
@@ -152,6 +165,7 @@ function applyColours(key = S.key) {
   const rs = document.documentElement.style;
   for (const k of ['surface', 'bar', 'line', 'text', 'soft', 'muted', 'accent']) rs.setProperty('--' + k, sc[k]);
   rs.setProperty('--gapc', gutter(S.dark, look));
+  sc.brush.forEach((c, k) => rs.setProperty(`--st${k + 1}`, c)); // the window strip's colours
   if (key === S.key) $('meta[name="theme-color"]')?.setAttribute('content', sc.bar);
 }
 
@@ -223,7 +237,7 @@ function resetEdges() {
  * little bigger again, so there are fewer to draw.
  */
 function cellTarget(w, h) {
-  const base = Math.min(24, Math.max(10, Math.sqrt(w * h) / 58));
+  const base = Math.min(24, Math.max(7.5, Math.sqrt(w * h) / (Math.min(w, h) < 640 ? 70 : 58)));
   return S.lite ? base * 1.3 : base;
 }
 
@@ -327,7 +341,7 @@ function layoutWebBoxes() {
   const margin = narrow ? 1 : 2;
   // Cards are a comfortable reading width (up to ~880px) and centred, leaving plenty of board;
   // on phones too there is a band of board either side.
-  const span = Math.min(board.cols - (narrow ? 6 : 2 * margin * 2), Math.ceil(880 / cw));
+  const span = Math.min(board.cols - (narrow ? 8 : 2 * margin * 2), Math.ceil(880 / cw));
   const c0 = Math.floor((board.cols - span) / 2);
   const inset = look.chrome !== 'hairline'; // Floating & Frame: header and footer as wide as the content
   const rs = document.documentElement.style;
@@ -390,7 +404,7 @@ function layoutWebBoxes() {
   const maxRows = Math.max(6, Math.floor(room * (narrow ? 0.8 : 0.76)));
   for (const p of pages) {
     if (p.el.hidden) continue;
-    const key = [span, maxRows, cw, look.font, look.chrome, document.documentElement.dataset.vp].join('|');
+    const key = [span, maxRows, cw, look.font, look.chrome, look.card, document.documentElement.dataset.vp].join('|');
     if (p.fitKey !== key) {
       p.fitKey = key;
       fitCard(p, (r) => rowsFor(p.el, span) <= r, maxRows, narrow);
@@ -406,7 +420,7 @@ function layoutWebBoxes() {
  */
 function fitCard(pg, fits, maxRows, phone) {
   const inner = $('.w-fit', pg.el);
-  const base = phone ? 0.9 : 1; // phones: smaller sections, more board
+  const base = phone ? 0.84 : 1; // phones: smaller sections, more board
   const floor = base * 0.96; // only the slightest shrink: anything more is split into parts
   const setZoom = (z) => (inner.style.zoom = String(z));
   pg.parts = [pg.units];
@@ -521,7 +535,7 @@ function shotKey(el) {
         ? el.textContent
         : el.dataset.part || '';
   const accent = document.documentElement.style.getPropertyValue('--accent');
-  return [el.id || el.tagName, extra, accent, S.dark, look.palette, look.chrome, look.font, board.dpr, r.left, r.top, r.width, r.height].join('|');
+  return [el.id || el.tagName, extra, accent, S.dark, look.palette, look.chrome, look.font, document.documentElement.dataset.card, board.dpr, r.left, r.top, r.width, r.height].join('|');
 }
 function snapshot(el) {
   const key = shotKey(el);
@@ -568,7 +582,7 @@ function renderSnapshot(el) {
           ? `<div id="site" style="position:relative;inset:auto"><main>${html}</main></div>`
           : `<div id="site" style="position:relative;inset:auto">${html}</div>`;
     const root = document.documentElement;
-    const attrs = `data-font="${look.font}" data-chrome="${look.chrome}" data-theme="${root.dataset.theme}" data-vp="${root.dataset.vp || ''}"`;
+    const attrs = `data-font="${look.font}" data-chrome="${look.chrome}" data-theme="${root.dataset.theme}" data-vp="${root.dataset.vp || ''}" data-card="${root.dataset.card}"`;
     const vars = esc(root.style.cssText);
     const dpr = board.dpr;
     return (async () => {
@@ -1540,6 +1554,14 @@ $('#enter').addEventListener('click', () => enter());
 prevBtn.addEventListener('click', () => step(-1, centreOf(prevBtn)));
 nextBtn.addEventListener('click', () => step(1, centreOf(nextBtn)));
 themeToggle.addEventListener('click', toggleTheme);
+// (Temporary, while choosing: window or plain sections.)
+cardToggle.setAttribute('aria-pressed', String(look.card === 'window'));
+cardToggle.addEventListener('click', () => {
+  look.card = look.card === 'window' ? 'plain' : 'window';
+  saveLook(look);
+  options.render();
+  onLookChange('card');
+});
 brushToggle.addEventListener('click', () => {
   S.brushOn = !S.brushOn;
   brushToggle.setAttribute('aria-pressed', String(S.brushOn));
@@ -1619,7 +1641,24 @@ const keyFromHash = () => {
 window.addEventListener('popstate', () => go(keyFromHash() || 'intro', { push: false }));
 
 /** A design option changed (from the review panel). */
+/** Window or plain sections: the visible card flips across to the other style in a wave. */
+function switchCards() {
+  cardToggle.setAttribute('aria-pressed', String(look.card === 'window'));
+  if (S.key === 'intro' || !board.cells.length) {
+    applyLook();
+    return layoutWeb();
+  }
+  webGo(
+    () => {
+      applyLook();
+      layoutWeb();
+    },
+    { dir: 1, toKey: S.key, origin: centreOf(cardToggle) },
+  );
+}
+
 async function onLookChange(key) {
+  if (key === 'card') return switchCards();
   cancelWeb();
   applyLook();
   shotCache.clear();
