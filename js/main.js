@@ -6,7 +6,7 @@
 
 import { Board, blank, solid, source as imageSource, slice } from './board.js';
 import { Paint } from './paint.js';
-import { loadLook, saveLook, scheme as makeScheme, gutter, bgMode, mountOptions } from './design.js';
+import { loadLook, saveLook, scheme as makeScheme, gutter, bgMode, mountOptions, COMBOS, comboOf, setCombo } from './design.js';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = (s, r = document) => r.querySelector(s);
@@ -88,7 +88,7 @@ for (const pg of pages) {
   const status = document.createElement('div');
   status.className = 'w-statusline';
   status.setAttribute('aria-hidden', 'true');
-  status.innerHTML = `<span>SEC ${pg.num}/${String(pages.length).padStart(2, '0')}</span><span>54.78°N 01.58°W</span>`;
+  status.innerHTML = `<span>SEC ${pg.num}/${String(pages.length).padStart(2, '0')}</span>`;
   el.append(status);
 }
 
@@ -108,7 +108,7 @@ for (const pg of pages) {
   const status = document.createElement('div');
   status.className = 'w-statusline';
   status.setAttribute('aria-hidden', 'true');
-  status.innerHTML = '<span>54.78°N 01.58°W</span><span>READY</span>';
+  status.innerHTML = `<span>SEC 00/${String(pages.length).padStart(2, '0')}</span><span>READY</span>`;
   introEl.append(status);
 }
 
@@ -185,6 +185,7 @@ function applyLook() {
   root.dataset.font = look.font;
   root.dataset.chrome = look.chrome;
   root.dataset.card = look.card;
+  board.flipStyle = look.flip;
   root.dataset.theme = S.dark ? 'dark' : 'light';
   paint.mode = bgMode(look);
 }
@@ -208,6 +209,27 @@ const mixHex = (a, b, t) => {
   const p = hexToRgb(a);
   const q = hexToRgb(b);
   return rgbHex(...p.map((v, k) => Math.round(v + (q[k] - v) * t)));
+};
+// The same blend in OKLab, where halfway between two colours looks halfway (no muddy dip).
+const toLin = (c) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+const fromLin = (c) => Math.round(255 * Math.min(1, Math.max(0, c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055)));
+function hexToLab(h) {
+  const [r, g, b] = hexToRgb(h).map(toLin);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
+}
+function labToHex([L, A, B]) {
+  const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
+  const m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
+  const s = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
+  return rgbHex(fromLin(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s), fromLin(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s), fromLin(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s));
+}
+const mixLab = (a, b, t) => {
+  const p = hexToLab(a);
+  const q = hexToLab(b);
+  return labToHex(p.map((v, k) => v + (q[k] - v) * t));
 };
 
 /** What a switch shows when it isn't standing in for a section: null = background. */
@@ -414,7 +436,7 @@ function layoutWebBoxes() {
   // the nav on the header's row as long as they can, since height is what they lack).
   const short = board.cssH <= 560 && board.cssW > board.cssH;
   fitBar(headerEl(), bw * cw - gap, short ? [[], ['compact'], ['compact', 'tight'], ['stack', 'tight'], ['stack', 'tight', 'abbr']] : [[], ['compact'], ['stack'], ['stack', 'tight'], ['stack', 'tight', 'abbr']]);
-  fitBar(footerEl(), bw * cw - gap, [[], ['compact'], ['nocopy'], ['nocopy', 'compact']]);
+  fitBar(footerEl(), bw * cw - gap, [[], ['compact'], ['nocopy'], ['nocopy', 'compact'], ['nocopy', 'compact', 'tight']]);
   const hh = measure(headerEl(), bw);
   footerEl().style.paddingBottom = ''; // measured without the overhang padding (set below)
   const fh = measure(footerEl(), bw);
@@ -441,7 +463,9 @@ function layoutWebBoxes() {
       fitCard(p, (r) => rowsFor(p.el, span) <= r, short ? room : maxRows, room, narrow);
     }
     const h = p.rows(rowsFor, span);
-    place(p.el, c0, top + Math.floor((room - h) / 2), span, h); // centred in the space
+    // Every card's top sits at the same spot: where the tallest card allowed would be centred.
+    const cap = short ? room : maxRows;
+    place(p.el, c0, top + Math.max(0, Math.floor((room - cap) / 2)), span, h);
   }
 }
 
@@ -1109,12 +1133,13 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
     allCells(),
     (i, to) => {
       const delay = ahead + field.tau(...cellCentre(i)) + rand() * 25;
-      // One soft step half-way between what the switch shows now and where it is going (so a
-      // card's switches stay close to the card's colours as they flip).
+      // One soft step between what the switch shows now and where it is going, blended in OKLab
+      // and leaning towards the new colours (so a card's switches stay close to the card's
+      // colours, and the board's pass through colours that belong to the new page).
       const from = board.cells[i].cur;
       const a = faceColour(from);
       const b = faceColour(to);
-      const steps = a && b && a !== b ? [solid(mixHex(a, b, 0.5))] : null;
+      const steps = a && b && a !== b ? [solid(mixLab(a, b, 0.62))] : null;
       span = Math.max(span, delay);
       return { delay, dur: DUR, steps, stepDur: STEP, gap: board.gapColor, edgesIn: ahead, edgesOut: S.overlay.has(i) ? 170 : 0 };
     },
@@ -1358,7 +1383,7 @@ async function switchTheme(dark, preShots = null, from = liveSwitch()) {
         const from = board.cells[i].cur;
         const a = faceColour(from);
         const b = faceColour(to);
-        if (a && b && a !== b) steps = levels.map((n) => solid(mixHex(a, b, BLENDS[n])));
+        if (a && b && a !== b) steps = levels.map((n) => solid(mixLab(a, b, BLENDS[n])));
       }
       const stepDur = FLIP_STEP;
       const dur = FLIP_DUR;
@@ -1524,6 +1549,7 @@ function* cellsBetween(a, b) {
 function startPainting(b) {
   if (b.painting || S.brush !== b || b.noPaint) return;
   b.painting = true;
+  S.paintedAt = Infinity; // (a paint stroke's release isn't a pulse click)
   clearTimeout(b.timer);
   document.documentElement.classList.add('painting');
   document.getSelection()?.removeAllRanges();
@@ -1533,6 +1559,7 @@ function startPainting(b) {
 
 function dropBrush() {
   if (!S.brush) return;
+  if (S.brush.painting) S.paintedAt = performance.now();
   clearTimeout(S.brush.timer);
   S.brush = null;
   document.documentElement.classList.remove('painting');
@@ -1643,6 +1670,30 @@ cardToggle.addEventListener('click', () => {
   options.render();
   onLookChange('card');
 });
+// (Temporary, while choosing.) The switch flip style, and the colour pulse.
+const flipToggle = $('#flip-toggle');
+const pulseToggle = $('#pulse-toggle');
+const flipNames = { fall: 'Fall', turn: 'Turn', roll: 'Roll' };
+const showFlip = () => ($('.ft-v', flipToggle).textContent = flipNames[look.flip]);
+showFlip();
+flipToggle.addEventListener('click', () => {
+  const order = Object.keys(flipNames);
+  look.flip = order[(order.indexOf(look.flip) + 1) % order.length];
+  saveLook(look);
+  options.render();
+  onLookChange('flip');
+});
+pulseToggle.addEventListener('click', () => {
+  S.pulseOn = !S.pulseOn;
+  pulseToggle.setAttribute('aria-pressed', String(S.pulseOn));
+  $('.ft-v', pulseToggle).textContent = S.pulseOn ? 'On' : 'Off';
+});
+// With the pulse on, a click on the board (not a drag or paint stroke) moves the page to its
+// next colour combo, rippling out from the click.
+canvas.addEventListener('click', (e) => {
+  if (!S.pulseOn || S.key === 'intro' || performance.now() - (S.paintedAt || 0) < 300) return;
+  pulseCombo({ x: e.clientX, y: e.clientY });
+});
 brushToggle.addEventListener('click', () => {
   S.brushOn = !S.brushOn;
   brushToggle.setAttribute('aria-pressed', String(S.brushOn));
@@ -1740,7 +1791,32 @@ function switchCards() {
   );
 }
 
+/** The board ripples from `origin` into the page's next colour combo. */
+function pulseCombo(origin) {
+  const page = S.key;
+  const n = COMBOS[page]?.length || 1;
+  setCombo(page, (comboOf(page) + 1) % n);
+  applyColours();
+  retintGutter();
+  S.frame = paint.frame(S.pt, scheme());
+  S.lastStep = performance.now();
+  const field = motionField('ripple', 1, origin);
+  retarget(allCells(), (i, to) => {
+    const a = faceColour(board.cells[i].cur);
+    const b = faceColour(to);
+    return {
+      delay: 40 + field.tau(...cellCentre(i)) + rand() * 25,
+      dur: FLIP_DUR,
+      steps: a && b && a !== b ? [solid(mixLab(a, b, 0.62))] : null,
+      stepDur: FLIP_STEP,
+      gap: board.gapColor,
+    };
+  });
+  schedulePrefetch();
+}
+
 async function onLookChange(key) {
+  if (key === 'flip') return showFlip(), applyLook();
   if (key === 'card') return switchCards();
   cancelWeb();
   applyLook();

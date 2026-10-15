@@ -74,6 +74,7 @@ export class Board {
     this.glyphCache = new Map();
     this.chromes = new Map();
     this.gapColor = '#050506';
+    this.flipStyle = 'fall'; // how a switch flips: 'fall' (split-flap), 'turn' or 'roll'
   }
 
   /** Change the colour of the gutters between flaps at once (on start-up).
@@ -252,6 +253,13 @@ export class Board {
         }
       }
       const p = Math.min(1, Math.max(0, (now - a.t0) / a.dur));
+      if (this.flipStyle === 'turn' || this.flipStyle === 'roll') {
+        this.drawMove(a, p, gm, x, y);
+        if (ca < 1) ctx.globalAlpha = ca;
+        if (ca > 0) ctx.drawImage(this.chrome(s.gap || this.gapColor), x, y);
+        ctx.globalAlpha = 1;
+        return;
+      }
       // Gravity: the flap starts slowly and accelerates as it falls.
       const theta = Math.PI * (p * p * 0.55 + p * 0.45);
       const bh = fh - hy;
@@ -283,6 +291,50 @@ export class Board {
     if (ca < 1) ctx.globalAlpha = ca;
     if (ca > 0) ctx.drawImage(this.chrome(s.gap || this.gapColor), x, y);
     ctx.globalAlpha = 1;
+  }
+
+  /** Draw the whole of face `f` squeezed or shifted into a destination box. */
+  drawFace(f, gm, dx, dy, dw, dh) {
+    if (dw < 0.5 || dh < 0.5) return;
+    const ctx = this.ctx;
+    ctx.fillStyle = f.bg;
+    ctx.fillRect(dx, dy, dw, dh);
+    if (f.t === 'glyph' || f.t === 'tri') ctx.drawImage(this.glyphCanvas(f, gm), 0, 0, gm.fw, gm.fh, dx, dy, dw, dh);
+    else if (f.t === 'slice') ctx.drawImage(f.src.canvas, f.sx, f.sy, gm.fw, gm.fh, dx, dy, dw, dh);
+  }
+
+  /**
+   * The alternative flips (for comparison): 'turn' spins the tile on its vertical axis, like a
+   * placard turning in its slot; 'roll' rolls the new face down over the old, like a drum.
+   */
+  drawMove(a, p, gm, x, y) {
+    const ctx = this.ctx;
+    const { fw, fh } = gm;
+    const e = p * p * (3 - 2 * p);
+    ctx.fillStyle = this.flipStyle === 'turn' ? a.to.bg || this.gapColor : this.gapColor;
+    ctx.fillRect(x, y, fw, fh);
+    if (this.flipStyle === 'turn') {
+      const c = Math.abs(Math.cos(Math.PI * e));
+      const w = fw * c;
+      this.drawFace(e < 0.5 ? a.from : a.to, gm, x + (fw - w) / 2, y, w, fh);
+      ctx.fillStyle = '#000';
+      ctx.globalAlpha = 0.3 * (1 - c);
+      ctx.fillRect(x + (fw - w) / 2, y, w, fh);
+      ctx.globalAlpha = 1;
+      return;
+    }
+    const off = fh * e;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, fw, fh);
+    ctx.clip();
+    this.drawFace(a.from, gm, x, y + off, fw, fh);
+    this.drawFace(a.to, gm, x, y + off - fh, fw, fh);
+    ctx.fillStyle = '#000';
+    ctx.globalAlpha = 0.22 * Math.sin(Math.PI * e);
+    ctx.fillRect(x, y + off - 1.5, fw, 3); // the seam between the two faces
+    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   redrawAll() {

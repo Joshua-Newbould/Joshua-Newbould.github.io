@@ -10,9 +10,10 @@ export const DECISIONS = {
   font: { label: 'Display type', options: { grotesk: 'Space Grotesk', inter: 'Inter Tight', chakra: 'Chakra Petch' } },
   motion: { label: 'Transition', options: { sweep: 'Sweep', ripple: 'Ripple', cascade: 'Cascade' } },
   card: { label: 'Sections', options: { window: 'Window', plain: 'Plain' } },
+  flip: { label: 'Switch flip', options: { fall: 'Fall', turn: 'Turn', roll: 'Roll' } },
 };
 
-export const DEFAULT_LOOK = { palette: 'mineral', bg: 'silk', chrome: 'hairline', font: 'grotesk', motion: 'sweep', card: 'window' };
+export const DEFAULT_LOOK = { palette: 'mineral', bg: 'silk', chrome: 'hairline', font: 'grotesk', motion: 'sweep', card: 'window', flip: 'fall' };
 
 const valid = (k, v) => DECISIONS[k] && Object.hasOwn(DECISIONS[k].options, v);
 
@@ -57,7 +58,49 @@ export function oklch(L, C, h) {
 // Schemes
 
 // Each page's hue identity (degrees, OKLCH).
-const PAGE_HUE = { about: 48, research: 240, publications: 305, contact: 168 };
+// Each page's base hue (its card tint and accent), spread round the colour wheel.
+const PAGE_HUE = { about: 48, research: 268, publications: 335, contact: 192 };
+
+// Each page's colour combos for the board (Mineral palette): a default and two alternatives,
+// each an arc round the colour wheel. A click on the board (with the pulse on) moves to the
+// next one.
+export const COMBOS = {
+  about: [{ name: 'Apricot', arc: [25, 75] }, { name: 'Sunset', arc: [345, 45] }, { name: 'Citrus', arc: [50, 100] }],
+  research: [{ name: 'Indigo', arc: [245, 290] }, { name: 'Ultramarine', arc: [215, 260] }, { name: 'Twilight', arc: [270, 320] }],
+  publications: [{ name: 'Fuchsia', arc: [310, 360] }, { name: 'Rose', arc: [330, 20] }, { name: 'Orchid', arc: [285, 335] }],
+  contact: [{ name: 'Lagoon', arc: [170, 215] }, { name: 'Aurora', arc: [150, 250] }, { name: 'Jade', arc: [135, 178] }],
+};
+const combo = (() => {
+  try {
+    return { about: 0, research: 0, publications: 0, contact: 0, ...JSON.parse(localStorage.getItem('combos') || '{}') };
+  } catch {
+    return { about: 0, research: 0, publications: 0, contact: 0 };
+  }
+})();
+export const comboOf = (page) => combo[page] ?? 0;
+export function setCombo(page, k) {
+  combo[page] = k;
+  try {
+    localStorage.setItem('combos', JSON.stringify(combo));
+  } catch {}
+}
+const arcOf = (page) => COMBOS[page]?.[comboOf(page)]?.arc;
+const arcMid = ([a, b]) => (a + ((b - a + 360) % 360) / 2) % 360;
+
+/** A combo's six pigments: along its arc and back (so neighbours always blend cleanly). */
+function comboPigments([a, b], dark) {
+  const span = (b - a + 360) % 360;
+  const hues = [0, 1 / 3, 2 / 3, 1, 2 / 3, 1 / 3].map((f) => (a + span * f) % 360);
+  const L = dark ? [0.42, 0.48, 0.54, 0.46, 0.58, 0.38] : [0.76, 0.81, 0.86, 0.8, 0.89, 0.73];
+  const C = dark ? [0.1, 0.1, 0.09, 0.11, 0.08, 0.1] : [0.1, 0.095, 0.085, 0.11, 0.07, 0.105];
+  return hues.map((h, k) => {
+    // Warm hues go brown when dark: they keep a lighter, clearer tone, the more so the
+    // nearer they are to yellow (an orange or gold below about L 0.7 reads as ochre).
+    if (!dark || h <= 15 || h >= 110) return oklch(L[k], C[k], h);
+    const yellow = Math.min(1, Math.max(0, (h - 35) / 45));
+    return oklch(Math.max(L[k] + 0.14, 0.62 + 0.12 * yellow), C[k] + 0.03, h);
+  });
+}
 
 // Per palette: the hue the neutrals lean towards, and how each page's paint is built.
 const PALETTES = {
@@ -115,7 +158,7 @@ function introPigments(palette, dark) {
 
 /** The colours for one page (or 'intro') in one theme under a look. */
 export function scheme(page, dark, look) {
-  const id = [page, dark ? 'd' : 'l', look.palette].join('|');
+  const id = [page, dark ? 'd' : 'l', look.palette, comboOf(page)].join('|');
   if (cache.has(id)) return cache.get(id);
   const pal = PALETTES[look.palette];
   const intro = page === 'intro';
@@ -123,8 +166,8 @@ export function scheme(page, dark, look) {
   const hs = pal.neutral(h, dark); // hue the neutral surfaces lean towards
   const tint = look.palette === 'graphite' ? 0.006 : 0.012;
   const sc = {
-    name: page,
-    pigments: intro ? introPigments(look.palette, dark) : pal.pigments(h, dark),
+    name: page + (intro ? '' : '#' + comboOf(page)),
+    pigments: intro ? introPigments(look.palette, dark) : look.palette === 'mineral' && arcOf(page) ? comboPigments(arcOf(page), dark) : pal.pigments(h, dark),
     surface: dark ? oklch(0.205, tint, hs) : oklch(0.975, tint * 0.6, hs),
     bar: dark ? oklch(0.175, tint, hs) : oklch(0.955, tint * 0.8, hs),
     line: dark ? oklch(0.32, tint * 1.2, hs) : oklch(0.88, tint * 1.2, hs),
@@ -151,7 +194,7 @@ export const gutter = (dark, look, page = 'intro') => {
     return dark ? oklch(0.13, 0.01, hs) : oklch(0.66, 0.012, hs);
   }
   if (page === 'intro' || !(page in PAGE_HUE)) return dark ? oklch(0.15, 0.01, 255) : oklch(0.76, 0.01, 255);
-  const h = PAGE_HUE[page];
+  const h = look.palette === 'mineral' && arcOf(page) ? arcMid(arcOf(page)) : PAGE_HUE[page];
   return dark ? oklch(0.15, 0.025, h) : oklch(0.72, 0.035, h);
 };
 

@@ -257,6 +257,43 @@ body {
   padding-bottom: 0;
 }
 
+/* Temporary try-out controls in the footer: the switch flip style and the colour pulse. */
+.foot-tools {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  margin-right: 1.5rem;
+}
+.foot-tools button {
+  white-space: nowrap;
+  padding: 5px 9px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.foot-tools .ft-v {
+  color: var(--text);
+}
+.foot-tools button[aria-pressed="true"] {
+  background: var(--text);
+  color: var(--surface);
+  box-shadow: none;
+}
+.foot-tools button[aria-pressed="true"] .ft-v {
+  color: var(--surface);
+}
+.js #site > footer.nocopy .foot-tools {
+  margin-left: 0;
+}
+.js #site > footer.tight .foot-tools .ft-k {
+  display: none;
+}
+html:not(.js) .foot-tools {
+  display: none;
+}
+
 /* ---------- Header & footer styles ---------- */
 
 /* Hairline: flat, full width, a single rule against the content. */
@@ -468,7 +505,7 @@ html.brush-on main section {
   margin-right: 0.9em;
 }
 .w-big {
-  margin: 0 0 18px;
+  margin: 0 0 12px;
   font-family: var(--display);
   font-weight: var(--display-weight);
   font-size: clamp(30px, 3.6vw, 54px);
@@ -489,15 +526,16 @@ html.brush-on main section {
 }
 .js main dl {
   display: grid;
-  grid-template-columns: minmax(8.5rem, max-content) 1fr;
-  gap: 4px 1.5rem;
-  margin: 26px 0 0;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  gap: 7px 1.75rem;
+  margin: 22px 0 0;
 }
 .js main dl > div {
   display: contents;
 }
 .js main dt {
-  font: 500 10.5px/2.1 var(--mono);
+  font: 500 10.5px/1.65 var(--mono);
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--muted);
@@ -513,13 +551,13 @@ html.brush-on main section {
 .js #research ul {
   list-style: none;
   padding: 0;
-  margin: 26px 0 0;
+  margin: 22px 0 0;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 26px 40px;
 }
 .js #research h3 {
-  margin: 8px 0 6px;
+  margin: 3px 0 6px;
   font: 600 12px/1.5 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -540,12 +578,13 @@ html.brush-on main section {
 .js #publications ol {
   list-style: none;
   padding: 0;
-  margin: 22px 0 0;
+  margin: 18px 0 0;
 }
 .js #publications li {
   display: grid;
   grid-template-columns: 5rem 1fr auto;
-  gap: 0 1.5rem;
+  align-items: baseline;
+  gap: 2px 1.5rem;
   padding: 16px 0;
   border-top: 1px solid var(--line);
 }
@@ -582,8 +621,8 @@ html.brush-on main section {
    media queries, because section snapshots are rendered at the section's own size. */
 .js[data-vp~="wide"] #about .w-fit {
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.25fr);
-  column-gap: 56px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  column-gap: 48px;
   align-items: start;
 }
 .js[data-vp~="wide"] #about .w-fit > :not(dl):not(.bio) {
@@ -595,6 +634,29 @@ html.brush-on main section {
 .js[data-vp~="wide"] #about .w-fit > .bio {
   grid-column: 2;
   margin-top: 8px;
+}
+
+/* About, on a part without the facts: the biography takes the card's full width. */
+.js[data-vp~="wide"] #about .w-fit:has(> dl[hidden]) > .bio {
+  grid-column: 1 / -1;
+}
+.js #about .bio > p:not([hidden]):first-child,
+.js #about .bio > [hidden] + p:not([hidden]) {
+  margin-top: 0;
+}
+.js #about .w-fit > .bio {
+  margin-top: 16px;
+}
+.js[data-vp~="wide"] #about .w-fit > .bio {
+  margin-top: 22px;
+}
+/* Phones: each fact's label sits over its value. */
+.js[data-vp~="phone"] main dl {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 0;
+}
+.js[data-vp~="phone"] main dd {
+  margin-bottom: 9px;
 }
 
 /* ---------- Title screen ---------- */
@@ -674,7 +736,7 @@ html.brush-on main section {
   align-items: center;
   gap: 10px;
   height: 30px;
-  margin: 0 calc(-1 * var(--pad-x)) calc(var(--pad-y) - 4px);
+  margin: 0 calc(-1 * var(--pad-x)) 22px;
   padding: 0 14px;
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--text) 4%, var(--surface));
@@ -899,8 +961,8 @@ html.brush-on main section {
   display: none;
 }
 .js #site > footer.nocopy .foot-nav {
-  width: 100%;
-  justify-content: space-between;
+  margin-left: auto;
+  gap: 1.25rem;
 }
 
 .js[data-vp~="short"] main section[data-page] {
