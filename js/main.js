@@ -36,6 +36,9 @@ const pages = $$('[data-page]').map((el, i) => ({
 }));
 const nav = $$('#site-nav a').map((a) => ({ el: a, id: a.getAttribute('href').slice(1) }));
 const themeToggle = $('#theme-toggle');
+const themeSwitches = () => $$('.theme-switch'); // the header's, and the title box's
+/** The theme switch on screen now. */
+const liveSwitch = () => (S.key === 'intro' ? $('#intro-theme') : themeToggle);
 const brushToggle = $('#brush-toggle');
 const cardToggle = $('#card-toggle');
 const prevBtn = $('[data-board="prev"]');
@@ -95,6 +98,12 @@ for (const pg of pages) {
   bar.className = 'w-bar';
   bar.setAttribute('aria-hidden', 'true');
   bar.innerHTML = '<span class="w-dot"></span><span class="w-path">JN://<b>home</b></span><span class="w-stripes"><i></i><i></i><i></i><i></i></span>';
+  // The sun/moon switch, here too, so the theme can be chosen before entering.
+  const sw = themeToggle.cloneNode(true);
+  sw.id = 'intro-theme';
+  bar.removeAttribute('aria-hidden');
+  for (const n of bar.querySelectorAll('.w-dot, .w-path, .w-stripes')) n.setAttribute('aria-hidden', 'true');
+  bar.append(sw);
   introEl.prepend(bar);
   const status = document.createElement('div');
   status.className = 'w-statusline';
@@ -295,7 +304,7 @@ function syncDom() {
     if (n.id === S.key) n.el.setAttribute('aria-current', 'page');
     else n.el.removeAttribute('aria-current');
   }
-  themeToggle.setAttribute('aria-checked', String(S.wantDark ?? S.dark));
+  for (const t of themeSwitches()) t.setAttribute('aria-checked', String(S.wantDark ?? S.dark));
   if (!intro) setFooterLabels(S.key);
   applyColours();
   layoutWeb();
@@ -573,7 +582,9 @@ function shotKey(el) {
       ? nav.find((n) => n.el.hasAttribute('aria-current'))?.id + themeToggle.getAttribute('aria-checked')
       : el === footerEl()
         ? el.textContent
-        : el.dataset.part || '';
+        : el === introEl
+          ? $('#intro-theme').getAttribute('aria-checked')
+          : el.dataset.part || '';
   const accent = document.documentElement.style.getPropertyValue('--accent');
   return [el.id || el.tagName, extra, accent, S.dark, look.palette, look.chrome, look.font, document.documentElement.dataset.card, board.dpr, r.left, r.top, r.width, r.height].join('|');
 }
@@ -1236,15 +1247,16 @@ function applyTheme(dark) {
 }
 
 /** Every click counts: a click mid-ripple turns it round from wherever the switches are. */
-function toggleTheme() {
+function toggleTheme(e) {
+  const from = e?.currentTarget || liveSwitch();
   S.wantDark = !(S.wantDark ?? S.dark);
   // Copy the bars as they are (usually already cached), before the switch moves: the copy
   // covers the old bars until the ripple passes, with a hole where the live switch shows.
   const bars = [headerEl(), footerEl()].filter((el) => !el.closest('[hidden]') && el.style.opacity !== '0');
   const barShots = reduce.matches ? null : bars.map((el) => snapshot(el));
   // The switch answers at once; the page follows in the ripple.
-  themeToggle.setAttribute('aria-checked', String(S.wantDark));
-  switchTheme(S.wantDark, barShots);
+  for (const t of themeSwitches()) t.setAttribute('aria-checked', String(S.wantDark));
+  switchTheme(S.wantDark, barShots, from);
 }
 
 /**
@@ -1252,8 +1264,8 @@ function toggleTheme() {
  * The page card joins as switches, each flipping from its light piece to its dark piece through
  * one half-way blend; the header and footer change continuously with the front.
  */
-async function switchTheme(dark, preShots = null) {
-  const origin = centreOf(themeToggle);
+async function switchTheme(dark, preShots = null, from = liveSwitch()) {
+  const origin = centreOf(from);
   const motion = !reduce.matches;
   // A wave or ripple already moving is turned round from wherever its switches are; only a
   // navigation still being prepared is cut short (it goes through at once).
@@ -1280,7 +1292,7 @@ async function switchTheme(dark, preShots = null) {
     const bars = [headerEl(), footerEl()].filter((el) => !el.closest('[hidden]') && el.style.opacity !== '0');
     const barShots = await Promise.all(preShots || bars.map((el) => snapshot(el)));
     if (token !== morphToken) return;
-    veilRedirect(barShots, themeToggle);
+    veilRedirect(barShots, from);
     const added = await boxesToSwitches(flipBoxes(), oldShots);
     if (token !== morphToken) return;
     if (added) for (const i of added) before.add(i);
@@ -1613,7 +1625,7 @@ $('#site-name').addEventListener('click', (e) => {
 $('#enter').addEventListener('click', () => enter());
 prevBtn.addEventListener('click', () => step(-1, centreOf(prevBtn)));
 nextBtn.addEventListener('click', () => step(1, centreOf(nextBtn)));
-themeToggle.addEventListener('click', toggleTheme);
+for (const t of themeSwitches()) t.addEventListener('click', toggleTheme);
 // (Temporary, while choosing: window or plain sections.)
 cardToggle.setAttribute('aria-pressed', String(look.card === 'window'));
 cardToggle.addEventListener('click', () => {
@@ -1638,6 +1650,8 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.target.closest?.('#design-options')) return;
+  // Enter or Space on a button or link does what that control does (e.g. the theme switch).
+  if (e.target.closest?.('a, button, input') && (e.key === ' ' || e.key === 'Enter')) return;
   if (S.key === 'intro') {
     // Any key moves on from the title, except keys that do something else: Tab and its
     // modifiers, lock and function keys, and browser shortcuts.
@@ -1646,7 +1660,6 @@ window.addEventListener('keydown', (e) => {
     enter();
     return;
   }
-  if (e.target.closest?.('a, button, input') && (e.key === ' ' || e.key === 'Enter')) return;
   if (e.key === 'ArrowRight') {
     e.preventDefault();
     step(1);

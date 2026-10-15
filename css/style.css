@@ -375,7 +375,7 @@ html.brush-on main section {
   cursor: crosshair;
 }
 
-#theme-toggle {
+.theme-switch {
   flex-shrink: 0;
   line-height: 0;
   border-radius: 999px;
@@ -417,21 +417,21 @@ html.brush-on main section {
   opacity: 0;
   transform: rotate(-60deg) scale(0.6);
 }
-#theme-toggle[aria-checked="true"] .tt-knob {
+.theme-switch[aria-checked="true"] .tt-knob {
   transform: translateX(22px);
 }
-#theme-toggle[aria-checked="true"] .tt-sun {
+.theme-switch[aria-checked="true"] .tt-sun {
   opacity: 0;
   transform: rotate(60deg) scale(0.6);
 }
-#theme-toggle[aria-checked="true"] .tt-moon {
+.theme-switch[aria-checked="true"] .tt-moon {
   opacity: 1;
   transform: none;
 }
-#theme-toggle:focus-visible {
+.theme-switch:focus-visible {
   outline: none;
 }
-#theme-toggle:focus-visible .tt-track {
+.theme-switch:focus-visible .tt-track {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -668,7 +668,8 @@ html.brush-on main section {
 .js[data-card="window"] .w-index {
   display: none; /* the title strip says where you are */
 }
-.js[data-card="window"] .w-bar {
+.js[data-card="window"] .w-bar,
+.js #intro .w-bar {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -713,7 +714,8 @@ html.brush-on main section {
 .w-stripes i:nth-child(4) {
   background: var(--st4);
 }
-.js[data-card="window"] .w-statusline {
+.js[data-card="window"] .w-statusline,
+.js #intro .w-statusline {
   position: absolute;
   left: var(--pad-x);
   bottom: 19px;
@@ -729,23 +731,31 @@ html.brush-on main section {
   bottom: 10px;
 }
 /* The title box as a window: the strip across its top, the status line along its foot. */
-.js[data-card="window"] #intro {
+.js #intro {
   padding-top: 52px;
   padding-bottom: 50px;
   box-shadow: inset 0 0 0 1px var(--line);
 }
-.js[data-card="window"] #intro .w-bar {
+.js #intro .w-bar {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   margin: 0;
 }
-.js[data-card="window"] #intro .w-dot {
+/* The title box's strip carries the theme switch, so light or dark can be chosen before entering. */
+.js #intro .theme-switch {
+  margin-left: 10px;
+}
+.js[data-vp~="short"] #intro .theme-switch {
+  transform: scale(0.82);
+  margin-left: 2px;
+}
+.js #intro .w-dot {
   background: var(--st4); /* a signal light */
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--st4) 22%, transparent);
 }
-.js[data-card="window"] #intro .w-statusline {
+.js #intro .w-statusline {
   left: 16px;
   right: 16px;
   justify-content: space-between;
@@ -917,7 +927,8 @@ html.brush-on main section {
 .js[data-vp~="short"][data-card="window"] main [data-strip] {
   display: none;
 }
-.js[data-vp~="short"][data-card="window"] .w-bar {
+.js[data-vp~="short"][data-card="window"] .w-bar,
+.js[data-vp~="short"] #intro .w-bar {
   height: 22px;
 }
 .js[data-vp~="short"][data-card="window"] main .w-statusline {
@@ -1005,7 +1016,7 @@ html.brush-on main section {
 
 html:not(.js) #board,
 html:not(.js) #enter,
-html:not(.js) #theme-toggle,
+html:not(.js) .theme-switch,
 html:not(.js) #brush-toggle,
 html:not(.js) #card-toggle,
 html:not(.js) .foot-nav {
