@@ -167,7 +167,7 @@ const S = {
   brushOn: false, // the paint brush works only while its button is on (off on every visit)
 };
 
-const SPEED = 0.018; // background time per second: a slow drift
+const SPEED = 0.032; // background time per second: a steady drift
 // How often the background is re-sampled, and how far a switch's colour may drift before it
 // flips. Without a GPU ("lite") both relax, so there is less to compute and to draw.
 const stepMs = () => (S.lite ? 900 : 500);
@@ -273,11 +273,22 @@ const concrete = (f, i) => f || solid(paintHex(i));
 /** The overall colour of a face, for blending between faces. */
 const faceColour = (f) => f.avg || f.bg;
 
-function rememberPaint(c) {
+function rememberPaint(c, stagger = false) {
   const k = c.i * 3;
   c.r = S.frame.rgb[k];
   c.g = S.frame.rgb[k + 1];
   c.b = S.frame.rgb[k + 2];
+  if (!stagger) return;
+  // After a transition every switch shows exactly the current colours, so none would be due to
+  // drift until all of them were at once (a lull, then a burst). Remember a colour a random
+  // distance off instead: the drift carries on, spread out, straight away.
+  const r = paintThreshold() * 0.9 * Math.sqrt(rand());
+  const u = rand() * 2 - 1;
+  const a = rand() * Math.PI * 2;
+  const v = Math.sqrt(1 - u * u);
+  c.r += r * v * Math.cos(a);
+  c.g += r * v * Math.sin(a);
+  c.b += r * u;
 }
 
 /** Bring switches up to date. `how(i, face)` returns flip options, or null to switch at once.
@@ -291,7 +302,7 @@ function retarget(indices, how, force = null) {
     if (c.key === key && !(force && force(i))) continue;
     c.key = key;
     c.abs = abs;
-    if (isPaint(abs)) rememberPaint(c);
+    if (isPaint(abs)) rememberPaint(c, true);
     const f = concrete(abs, i);
     const opts = how && !reduce.matches ? how(i, f) : null;
     if (opts) board.flip(c, f, opts);
@@ -1230,6 +1241,7 @@ function finishWeb() {
   for (const c of board.cells) c.gap = null;
   retarget(allCells(), null, (i) => board.busy(i) || board.cells[i].cur?.t === 'slice');
   board.redrawAll();
+  if (!reduce.matches) paintStep(performance.now()); // the background drift carries straight on
   schedulePrefetch();
 }
 
@@ -1742,7 +1754,7 @@ cardToggle.addEventListener('click', () => {
 // (Temporary, while choosing.) The switch flip style, and the colour pulse.
 const flipToggle = $('#flip-toggle');
 const pulseToggle = $('#pulse-toggle');
-const flipNames = { fall: 'Fall', turn: 'Turn', roll: 'Roll' };
+const flipNames = { fall: 'Classic', settle: 'Settle', crisp: 'Crisp' };
 const showFlip = () => ($('.ft-v', flipToggle).textContent = flipNames[look.flip]);
 showFlip();
 flipToggle.addEventListener('click', () => {

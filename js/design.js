@@ -10,7 +10,7 @@ export const DECISIONS = {
   font: { label: 'Display type', options: { grotesk: 'Space Grotesk', inter: 'Inter Tight', chakra: 'Chakra Petch' } },
   motion: { label: 'Transition', options: { sweep: 'Sweep', ripple: 'Ripple', cascade: 'Cascade' } },
   card: { label: 'Sections', options: { window: 'Window', plain: 'Plain', console: 'Console' } },
-  flip: { label: 'Switch flip', options: { fall: 'Fall', turn: 'Turn', roll: 'Roll' } },
+  flip: { label: 'Switch flip', options: { fall: 'Classic', settle: 'Settle', crisp: 'Crisp' } },
 };
 
 export const DEFAULT_LOOK = { palette: 'mineral', bg: 'silk', chrome: 'hairline', font: 'grotesk', motion: 'sweep', card: 'window', flip: 'fall' };
@@ -205,7 +205,7 @@ export const gutter = (dark, look, page = 'intro') => {
   // Light: a clear tint of the page's colour (warm combos take their warmer end, so the lines
   // read coral rather than khaki), a step darker than the lightest paint.
   const hl = look.palette === 'mineral' && arcOf(page) && h > 15 && h < 110 ? arcOf(page)[0] : h;
-  return dark ? oklch(0.15, 0.025, h) : oklch(0.7, 0.075, hl);
+  return dark ? oklch(0.15, 0.025, h) : oklch(0.72, 0.055, hl);
 };
 
 /** Which shader the background uses. */

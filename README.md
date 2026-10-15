@@ -41,7 +41,7 @@ Each design decision has a default and two alternatives, defined in `js/design.j
 | Display type | Space Grotesk · Inter Tight · Chakra Petch |
 | Transition | Sweep · Ripple · Cascade |
 | Sections | Window · Plain · Console (also on the temporary square button in the header) |
-| Switch flip | Fall · Turn · Roll (also on the temporary Flip button in the footer) |
+| Switch flip | Classic · Settle · Crisp: three versions of the split-flap fall (also on the temporary Fall button in the footer) |
 
 Press **D** (or open `?design`) for a panel to switch them live, or set them in the URL, e.g.
 `?palette=graphite&bg=contour&chrome=frame&font=chakra&motion=ripple&card=plain`. The choice is
