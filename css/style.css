@@ -728,7 +728,29 @@ html.brush-on main section {
 .js[data-card="window"] main section.paged .w-pager {
   bottom: 10px;
 }
-.js[data-card="window"][data-vp~="phone"] .w-statusline span + span {
+/* The title box as a window: the strip across its top, the status line along its foot. */
+.js[data-card="window"] #intro {
+  padding-top: 52px;
+  padding-bottom: 50px;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.js[data-card="window"] #intro .w-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  margin: 0;
+}
+.js[data-card="window"] #intro .w-dot {
+  background: var(--st4); /* a signal light */
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--st4) 22%, transparent);
+}
+.js[data-card="window"] #intro .w-statusline {
+  left: 16px;
+  right: 16px;
+  justify-content: space-between;
+}
+.js[data-card="window"][data-vp~="phone"] main .w-statusline span + span {
   display: none; /* phones: just the section number */
 }
 
@@ -880,13 +902,22 @@ html.brush-on main section {
 .w-pager {
   display: none;
 }
+/* Parts after the first don't repeat the lines under the title; short screens drop the title
+   too (the window strip, or the nav, says where you are). */
+.js main section.later [data-strip] {
+  display: none;
+}
+.js[data-vp~="short"] main section.later .w-big {
+  display: none;
+}
 /* (Specific enough to win over the phone and short-screen paddings.) */
 .js[data-vp] main section[data-page].paged {
   padding-bottom: 52px;
+  touch-action: pinch-zoom; /* a flick turns the part; the browser mustn't take it as a pan */
 }
 .js main section.paged .w-pager {
   position: absolute;
-  right: 22px;
+  right: calc(var(--pad-x) - 9px); /* the arrows' glyphs line up with the text's right edge */
   bottom: 12px;
   display: flex;
   align-items: center;
@@ -904,8 +935,10 @@ html.brush-on main section {
   color: var(--text);
   border-radius: 999px;
 }
-.w-pager button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+@media (hover: hover) {
+  .w-pager button:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--text) 8%, transparent);
+  }
 }
 .w-pager button:disabled {
   color: var(--line);
@@ -938,7 +971,8 @@ html.brush-on main section {
   grid-row: auto;
 }
 .js[data-vp~="phone"] #intro {
-  padding: 0 20px;
+  padding-left: 20px;
+  padding-right: 20px;
 }
 @media (max-width: 640px) {
   .do-row > span {

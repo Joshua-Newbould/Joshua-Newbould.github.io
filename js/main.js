@@ -89,6 +89,20 @@ for (const pg of pages) {
   el.append(status);
 }
 
+// The title box gets the same window strip and status line.
+{
+  const bar = document.createElement('div');
+  bar.className = 'w-bar';
+  bar.setAttribute('aria-hidden', 'true');
+  bar.innerHTML = '<span class="w-dot"></span><span class="w-path">JN://<b>home</b></span><span class="w-stripes"><i></i><i></i><i></i><i></i></span>';
+  introEl.prepend(bar);
+  const status = document.createElement('div');
+  status.className = 'w-statusline';
+  status.setAttribute('aria-hidden', 'true');
+  status.innerHTML = '<span>54.78°N 01.58°W</span><span>READY</span>';
+  introEl.append(status);
+}
+
 /** Show one part of a card (all of it when it fits in one). */
 function showPart(pg) {
   const parts = pg.parts;
@@ -102,10 +116,17 @@ function showPart(pg) {
   }
   const paged = parts.length > 1 || pg.splitting;
   pg.el.classList.toggle('paged', paged);
+  pg.el.classList.toggle('later', pg.part > 0); // parts after the first drop the repeated lines
   pg.el.dataset.part = paged ? `${pg.part + 1}/${parts.length}` : '';
   $('.pg-num', pg.pager).textContent = `${pg.part + 1} / ${parts.length}`;
-  $('.pg-prev', pg.pager).disabled = pg.part === 0;
-  $('.pg-next', pg.pager).disabled = pg.part === parts.length - 1;
+  const prev = $('.pg-prev', pg.pager);
+  const next = $('.pg-next', pg.pager);
+  const focused = document.activeElement;
+  prev.disabled = pg.part === 0;
+  next.disabled = pg.part === parts.length - 1;
+  // A pager arrow that has just run out hands keyboard focus to the other one.
+  if (focused === prev && prev.disabled && !next.disabled) next.focus({ preventScroll: true });
+  if (focused === next && next.disabled && !prev.disabled) prev.focus({ preventScroll: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +185,7 @@ function applyColours(key = S.key) {
   const sc = scheme(key);
   const rs = document.documentElement.style;
   for (const k of ['surface', 'bar', 'line', 'text', 'soft', 'muted', 'accent']) rs.setProperty('--' + k, sc[k]);
-  rs.setProperty('--gapc', gutter(S.dark, look));
+  rs.setProperty('--gapc', gutter(S.dark, look, S.key));
   sc.brush.forEach((c, k) => rs.setProperty(`--st${k + 1}`, c)); // the window strip's colours
   if (key === S.key) $('meta[name="theme-color"]')?.setAttribute('content', sc.bar);
 }
@@ -250,7 +271,7 @@ function build(first) {
   S.size = size;
   dropBrush();
   if (!first) cancelWeb(); // a wave's switches belong to the old grid
-  board.gapColor = gutter(S.dark, look);
+  board.gapColor = gutter(S.dark, look, S.key);
   board.configure(Board.metrics(cssW, cssH, dpr, cellTarget(cssW, cssH), 1.9), solid(board.gapColor));
   paint.resize(board);
   S.frame = paint.frame(S.pt, scheme());
@@ -407,7 +428,8 @@ function layoutWebBoxes() {
     const key = [span, maxRows, cw, look.font, look.chrome, look.card, document.documentElement.dataset.vp].join('|');
     if (p.fitKey !== key) {
       p.fitKey = key;
-      fitCard(p, (r) => rowsFor(p.el, span) <= r, maxRows, narrow);
+      // Short screens may use their whole height; elsewhere a card leaves board above and below.
+      fitCard(p, (r) => rowsFor(p.el, span) <= r, short ? room : maxRows, room, narrow);
     }
     const h = p.rows(rowsFor, span);
     place(p.el, c0, top + Math.floor((room - h) / 2), span, h); // centred in the space
@@ -415,60 +437,79 @@ function layoutWebBoxes() {
 }
 
 /**
- * Fit a card in `maxRows` without ever scrolling: shrink its text a little if that is enough,
- * otherwise split it into numbered parts (each as full as it can be) that flip like pages.
+ * Fit a card without ever scrolling. If it fits in `cap` rows it stays whole; otherwise it is
+ * split into numbered parts that flip like pages, balanced so they are about equally full. A
+ * piece too tall for a part on its own may use the whole `room`; only if it still doesn't fit
+ * is the text set a step smaller (and the card split again).
  */
-function fitCard(pg, fits, maxRows, phone) {
+function fitCard(pg, fits, cap, room, phone) {
   const inner = $('.w-fit', pg.el);
   const base = phone ? 0.84 : 1; // phones: smaller sections, more board
-  const floor = base * 0.96; // only the slightest shrink: anything more is split into parts
-  const setZoom = (z) => (inner.style.zoom = String(z));
-  pg.parts = [pg.units];
-  pg.part = 0;
-  showPart(pg);
-  setZoom(base);
-  let zoom = base;
-  if (!fits(maxRows)) {
-    setZoom(floor);
-    if (fits(maxRows)) {
-      let lo = floor;
-      let hi = base;
-      for (let k = 0; k < 6; k++) {
-        const mid = (lo + hi) / 2;
-        setZoom(mid);
-        if (fits(maxRows)) lo = mid;
-        else hi = mid;
-      }
-      zoom = lo;
-    } else {
-      // Parts: fill each with as many pieces as fit (a piece too tall alone gets a part to itself).
-      zoom = floor;
-      pg.splitting = true; // measured with room for the part controls
-      const parts = [[]];
-      for (const u of pg.units) {
-        const cur = parts[parts.length - 1];
-        pg.parts = [...parts.slice(0, -1), [...cur, u]];
-        pg.part = parts.length - 1;
-        showPart(pg);
-        if (cur.length && !fits(maxRows)) parts.push([u]);
-        else cur.push(u);
-      }
-      pg.parts = parts;
-      pg.splitting = false;
+  const keepUnit = pg.parts?.[pg.part]?.[0]; // stay on what was being read
+  // Greedy split at a height limit: each part as full as it can be.
+  const split = (limit) => {
+    pg.splitting = true; // measured with room for the part controls
+    const parts = [[]];
+    for (const u of pg.units) {
+      const cur = parts[parts.length - 1];
+      pg.parts = [...parts.slice(0, -1), [...cur, u]];
+      pg.part = parts.length - 1;
+      showPart(pg);
+      if (cur.length && !fits(limit)) parts.push([u]);
+      else cur.push(u);
     }
+    pg.splitting = false;
+    return parts;
+  };
+  const allFit = (parts) => {
+    pg.parts = parts;
+    for (let k = 0; k < parts.length; k++) {
+      pg.part = k;
+      showPart(pg);
+      if (!fits(room)) return false;
+    }
+    return true;
+  };
+  let done = false;
+  for (const z of [1, 0.92, 0.85, 0.78, 0.72]) {
+    inner.style.zoom = String(base * z);
+    pg.parts = [pg.units];
+    pg.part = 0;
+    showPart(pg);
+    if (fits(cap)) {
+      done = true;
+      break;
+    }
+    const parts = split(cap);
+    if (!allFit(parts)) continue;
+    // Balance: the lowest limit that still needs no more parts spreads the pieces evenly.
+    let lo = 3;
+    let hi = cap;
+    let best = parts;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const p = split(mid);
+      if (p.length <= parts.length && allFit(p)) {
+        best = p;
+        hi = mid;
+      } else lo = mid + 1;
+    }
+    pg.parts = best;
+    done = true;
+    break;
   }
-  setZoom(zoom);
-  pg.part = 0;
+  if (!done) pg.parts = split(cap); // (nothing fits even small: keep the last split)
+  pg.part = Math.max(0, pg.parts.findIndex((p) => p.includes(keepUnit)));
   // Every part gets the height of the tallest, so flicking through them doesn't resize the card.
   let tallest = 1;
-  const heights = (rowsFor, span) => {
+  pg.rows = (rowsFor, span) => {
     if (pg.heightKey !== pg.fitKey) {
       const keep = pg.part;
       tallest = 1;
       for (let k = 0; k < pg.parts.length; k++) {
         pg.part = k;
         showPart(pg);
-        tallest = Math.max(tallest, Math.min(maxRows, rowsFor(pg.el, span)));
+        tallest = Math.max(tallest, Math.min(room, rowsFor(pg.el, span)));
       }
       pg.part = keep;
       showPart(pg);
@@ -476,7 +517,6 @@ function fitCard(pg, fits, maxRows, phone) {
     }
     return tallest;
   };
-  pg.rows = heights;
   pg.heightKey = null;
   showPart(pg);
 }
@@ -1004,9 +1044,10 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
   // Flipping to another part of the same card leaves the header and footer alone.
   const samePage = fromKey === toKey;
   const barsSweep = fromKey !== 'intro' && toKey !== 'intro' && !fromNothing && !samePage;
-  // Bars that change colour in place keep any part-wiped copy (see veilRedirect); bars that
-  // join the wave as switches drop it.
-  if (!barsSweep && !samePage) clearThemeVeil();
+  // Bars that change colour in place keep any part-wiped copy (see veilRedirect). Bars that
+  // join the wave as switches keep it too, frozen, and it is wiped away by this wave's front.
+  const freezeVeil = !barsSweep && !samePage && themeVeil.children.length > 0;
+  if (freezeVeil) veilRedirect([]);
   restoreBrushBoxes(true); // brushed sections back to normal before they join the wave
   if (reduce.matches) {
     apply();
@@ -1066,7 +1107,7 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
   // Shadow and bars: the old shadow goes as the front arrives, the new one comes as switches land.
   const land = ahead + 30 + STEP + DUR;
   shadowWave(field, oldCard, morphBox(), ahead, land + 90, span);
-  if (barsSweep) veilWipe(field, ahead + 30 + STEP + DUR / 2, span);
+  if (barsSweep || freezeVeil) veilWipe(field, ahead + 30 + STEP + DUR / 2, span);
   await wait(Math.min(span + land + 220, 3200));
   if (token !== morphToken) return;
   finishWeb();
@@ -1110,6 +1151,7 @@ function go(key, { dir = 1, push = true, origin = null } = {}) {
   webGo(
     () => {
       S.key = key;
+      retintGutter(); // each page's gutters take its colour, changing with the wave
       const pg = pages[pageIndex(key)];
       if (pg?.part) {
         pg.part = 0; // a page opens at its first part
@@ -1171,6 +1213,13 @@ const centreOf = (el) => {
 /** A theme switch has been asked for that hasn't taken effect yet. */
 const themeWanted = () => S.wantDark != null && S.wantDark !== S.dark;
 
+/** The board's gutter colour for the current page and theme; switches keep theirs until a wave reaches them. */
+function retintGutter() {
+  const old = board.gapColor;
+  board.gapColor = gutter(S.dark, look, S.key);
+  if (old !== board.gapColor) for (const c of board.cells) c.gap = c.gap || old;
+}
+
 /** Take on a theme (the switches follow in whatever wave is running). */
 function applyTheme(dark) {
   const oldGap = board.gapColor;
@@ -1181,7 +1230,7 @@ function applyTheme(dark) {
   applyLook();
   // Every switch keeps its old gutter until the wave reaches it.
   for (const c of board.cells) c.gap = c.gap || oldGap;
-  board.gapColor = gutter(S.dark, look);
+  board.gapColor = gutter(S.dark, look, S.key);
   S.frame = paint.frame(S.pt, scheme());
   S.lastStep = performance.now();
 }
@@ -1191,7 +1240,7 @@ function toggleTheme() {
   S.wantDark = !(S.wantDark ?? S.dark);
   // Copy the bars as they are (usually already cached), before the switch moves: the copy
   // covers the old bars until the ripple passes, with a hole where the live switch shows.
-  const bars = [headerEl(), footerEl()].filter((el) => !el.closest('[hidden]'));
+  const bars = [headerEl(), footerEl()].filter((el) => !el.closest('[hidden]') && el.style.opacity !== '0');
   const barShots = reduce.matches ? null : bars.map((el) => snapshot(el));
   // The switch answers at once; the page follows in the ripple.
   themeToggle.setAttribute('aria-checked', String(S.wantDark));
@@ -1208,7 +1257,9 @@ async function switchTheme(dark, preShots = null) {
   const motion = !reduce.matches;
   // A wave or ripple already moving is turned round from wherever its switches are; only a
   // navigation still being prepared is cut short (it goes through at once).
-  const rippling = !!S.overlay && !pendingApply;
+  // A navigation (or part flip) still being set up: the theme rides its wave (see its apply()).
+  if (pendingApply) return;
+  const rippling = !!S.overlay;
   if (rippling) morphToken++;
   else cancelWeb({ keepTheme: true });
   if (dark === S.dark && !rippling) return; // asked for and back again before anything changed
@@ -1216,14 +1267,17 @@ async function switchTheme(dark, preShots = null) {
   themeRippling = true;
   let before = new Set();
   const oldShots = new Map();
-  const flipBoxes = () => visibleBoxes().filter((el) => el !== headerEl() && el !== footerEl());
+  // The card (or title) flips; bars still arriving as switches flip too, and bars that are
+  // showing change colour under the wipe.
+  const isBar = (el) => el === headerEl() || el === footerEl();
+  const flipBoxes = () => visibleBoxes().filter((el) => !isBar(el) || el.style.opacity === '0');
   if (motion) {
     if (!S.overlay) {
       resetEdges();
       S.overlay = new Map();
     }
     before = new Set(S.overlay.keys());
-    const bars = [headerEl(), footerEl()].filter((el) => !el.closest('[hidden]'));
+    const bars = [headerEl(), footerEl()].filter((el) => !el.closest('[hidden]') && el.style.opacity !== '0');
     const barShots = await Promise.all(preShots || bars.map((el) => snapshot(el)));
     if (token !== morphToken) return;
     veilRedirect(barShots, themeToggle);
@@ -1486,6 +1540,8 @@ function brushMove(e) {
   if (S.brush && e.pointerType === 'mouse' && !(e.buttons & 1)) dropBrush();
   const b = S.brush;
   if (!b || b.id !== e.pointerId) return false;
+  b.lx = e.clientX;
+  b.ly = e.clientY;
   if (!b.moved && Math.hypot(e.clientX - b.x, e.clientY - b.y) > 8) {
     // (A possible flick waits until it's clearly a slow drag.)
     if (b.flick && performance.now() - b.t0 < 280) return true;
@@ -1524,12 +1580,14 @@ for (const el of [canvas, source]) {
       const b = S.brush;
       if (!b || b.id !== e.pointerId) return;
       // A quick flick across a card with parts turns to the next or previous part.
-      const dx = e.clientX - b.x;
-      const dy = e.clientY - b.y;
-      if (type === 'pointerup' && b.flick && !b.painting && performance.now() - b.t0 < 450 && Math.max(Math.abs(dx), Math.abs(dy)) > 40) {
+      const [ex, ey] = type === 'pointercancel' && b.lx != null ? [b.lx, b.ly] : [e.clientX, e.clientY];
+      const dx = ex - b.x;
+      const dy = ey - b.y;
+      // (Some browsers end a fast touch drag with pointercancel rather than pointerup.)
+      if (b.flick && !b.painting && performance.now() - b.t0 < 450 && Math.max(Math.abs(dx), Math.abs(dy)) > 40) {
         const d = Math.abs(dy) > Math.abs(dx) ? dy : dx;
         dropBrush();
-        return goPart(d < 0 ? 1 : -1, { x: e.clientX, y: e.clientY });
+        return goPart(d < 0 ? 1 : -1, { x: ex, y: ey });
       }
       dropBrush();
     });
@@ -1650,8 +1708,9 @@ function switchCards() {
   }
   webGo(
     () => {
+      if (themeWanted()) applyTheme(S.wantDark);
       applyLook();
-      layoutWeb();
+      syncDom();
     },
     { dir: 1, toKey: S.key, origin: centreOf(cardToggle) },
   );
@@ -1663,7 +1722,7 @@ async function onLookChange(key) {
   applyLook();
   shotCache.clear();
   if (key === 'font') await document.fonts.load(`700 64px ${getComputedStyle(document.documentElement).getPropertyValue('--display')}`).catch(() => {});
-  if (key === 'palette') board.gapColor = gutter(S.dark, look);
+  if (key === 'palette') board.gapColor = gutter(S.dark, look, S.key);
   syncDom();
   S.frame = paint.frame(S.pt, scheme());
   S.lastStep = performance.now();

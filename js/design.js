@@ -57,7 +57,7 @@ export function oklch(L, C, h) {
 // Schemes
 
 // Each page's hue identity (degrees, OKLCH).
-const PAGE_HUE = { about: 14, research: 240, publications: 305, contact: 168 };
+const PAGE_HUE = { about: 0, research: 240, publications: 305, contact: 168 };
 
 // Per palette: the hue the neutrals lean towards, and how each page's paint is built.
 const PALETTES = {
@@ -98,19 +98,12 @@ const PALETTES = {
 
 const cache = new Map();
 
-/** The title screen's paint: a soft mix of every page's colours (Graphite stays grey). */
+/** The title screen's paint: cool, bright whites and silver greys (gunmetal in the dark). */
 function introPigments(palette, dark) {
-  if (palette === 'graphite') {
-    const greys = dark ? [0.15, 0.19, 0.23, 0.27, 0.21, 0.13] : [0.84, 0.88, 0.92, 0.95, 0.9, 0.8];
-    return greys.map((l) => oklch(l, 0.008, dark ? 255 : 75));
-  }
-  if (palette === 'nebula') return PALETTES.nebula.pigments(285, dark);
-  // Rose, orchid, lavender, periwinkle, sky, lilac: in order round the wheel, so neighbours
-  // blend into each other cleanly (never through grey).
-  const hues = [14, 340, 295, 250, 220, 300];
-  const L = dark ? [0.42, 0.46, 0.44, 0.48, 0.5, 0.43] : [0.78, 0.82, 0.8, 0.84, 0.86, 0.81];
-  const C = dark ? [0.07, 0.075, 0.075, 0.07, 0.06, 0.07] : [0.075, 0.075, 0.075, 0.07, 0.06, 0.07];
-  return hues.map((x, k) => oklch(L[k], C[k], x));
+  const hue = palette === 'graphite' ? (dark ? 255 : 75) : 255;
+  const L = dark ? [0.24, 0.31, 0.38, 0.45, 0.28, 0.35] : [0.985, 0.93, 0.87, 0.8, 0.955, 0.9];
+  const C = dark ? 0.014 : 0.008;
+  return L.map((l) => oklch(l, C, hue));
 }
 
 /** The colours for one page (or 'intro') in one theme under a look. */
@@ -119,7 +112,7 @@ export function scheme(page, dark, look) {
   if (cache.has(id)) return cache.get(id);
   const pal = PALETTES[look.palette];
   const intro = page === 'intro';
-  const h = intro ? (look.palette === 'mineral' ? 300 : pal.neutral(70, dark)) : PAGE_HUE[page] ?? 60;
+  const h = intro ? (look.palette === 'graphite' ? pal.neutral(70, dark) : 255) : PAGE_HUE[page] ?? 60;
   const hs = pal.neutral(h, dark); // hue the neutral surfaces lean towards
   const tint = look.palette === 'graphite' ? 0.006 : 0.012;
   const sc = {
@@ -138,16 +131,21 @@ export function scheme(page, dark, look) {
   };
   // Brush colours: the page's hues nudged round the wheel, a touch more colourful, never white.
   sc.brush = intro
-    ? [14, 300, 250].map((x) => oklch(dark ? 0.54 : 0.68, 0.09, x))
-    : [-16, 0, 14, 26].map((d) => oklch(dark ? 0.54 : 0.68, look.palette === 'graphite' ? 0.07 : 0.09, h + 18 + d));
+    ? [[0.6, 0.02, 255], [0.72, 0.02, 255], [0.62, 0.09, 245], [0.7, 0.11, 25]].map(([l, c, x]) => oklch(dark ? l - 0.08 : l, c, x)) // greys, a steel blue, a signal red
+    : [-20, -8, 4, 14].map((d) => oklch(dark ? 0.56 : 0.68, look.palette === 'graphite' ? 0.07 : 0.09, h + d)); // the page's own hues
   cache.set(id, sc);
   return sc;
 }
 
-/** Gutter colour between switches: one per theme (and palette), the same on every page. */
-export const gutter = (dark, look) => {
-  const hs = PALETTES[look.palette].neutral(70, dark);
-  return dark ? oklch(0.13, 0.01, hs) : oklch(0.66, 0.012, hs);
+/** Gutter colour between switches: a quiet tint of the page's own colour (neutral for Graphite). */
+export const gutter = (dark, look, page = 'intro') => {
+  if (look.palette === 'graphite') {
+    const hs = PALETTES.graphite.neutral(70, dark);
+    return dark ? oklch(0.13, 0.01, hs) : oklch(0.66, 0.012, hs);
+  }
+  if (page === 'intro' || !(page in PAGE_HUE)) return dark ? oklch(0.15, 0.01, 255) : oklch(0.76, 0.01, 255);
+  const h = PAGE_HUE[page];
+  return dark ? oklch(0.15, 0.025, h) : oklch(0.72, 0.035, h);
 };
 
 /** Which shader the background uses. */

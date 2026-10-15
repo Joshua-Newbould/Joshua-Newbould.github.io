@@ -239,6 +239,18 @@ export class Board {
     if (!a) {
       this.drawPart(s.cur, gm, x, 0, fh, y, fh);
     } else {
+      if (ca < 1) {
+        // Edges fading as it falls: the gutter strips take the face it is landing on, so the
+        // flap settles seamlessly into its neighbours.
+        const f = a.to;
+        ctx.fillStyle = f.bg || this.gapColor;
+        ctx.fillRect(x, y, this.cw, this.ch);
+        if (f.t === 'slice') {
+          const w = Math.max(0, Math.min(this.cw, f.src.canvas.width - f.sx));
+          const h = Math.max(0, Math.min(this.ch, f.src.canvas.height - f.sy));
+          if (w && h) ctx.drawImage(f.src.canvas, f.sx, f.sy, w, h, x, y, w, h);
+        }
+      }
       const p = Math.min(1, Math.max(0, (now - a.t0) / a.dur));
       // Gravity: the flap starts slowly and accelerates as it falls.
       const theta = Math.PI * (p * p * 0.55 + p * 0.45);
@@ -268,7 +280,9 @@ export class Board {
       }
       ctx.globalAlpha = 1;
     }
-    ctx.drawImage(this.chrome(s.gap || this.gapColor), x, y);
+    if (ca < 1) ctx.globalAlpha = ca;
+    if (ca > 0) ctx.drawImage(this.chrome(s.gap || this.gapColor), x, y);
+    ctx.globalAlpha = 1;
   }
 
   redrawAll() {
