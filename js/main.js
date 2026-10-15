@@ -745,6 +745,12 @@ const visibleBoxes = () => (S.key === 'intro' ? [introEl] : [headerEl(), morphBo
  *   ripple  outwards from what was clicked
  *   cascade down the board, row by row
  */
+// Every wave (page, part or theme) crosses the whole screen in the same time, whatever the
+// screen's size, and every switch in it flips at the same pace: one blend step, then the flip.
+const WAVE_MS = 850;
+const FLIP_STEP = 110;
+const FLIP_DUR = 200;
+
 function motionField(kind, dir = 1, origin = null) {
   const dpr = board.dpr;
   const colOf = (x) => (x * dpr - board.ox) / board.cw;
@@ -753,7 +759,7 @@ function motionField(kind, dir = 1, origin = null) {
   if (kind === 'ripple') {
     const o = origin || { x: board.cssW / 2, y: board.cssH / 2 };
     const far = Math.max(...[[0, 0], [board.cssW, 0], [0, board.cssH], [board.cssW, board.cssH]].map(([x, y]) => Math.hypot(x - o.x, y - o.y))) || 1;
-    const speed = far / 1000; // px per ms: everything reached within a second
+    const speed = far / WAVE_MS; // px per ms
     return {
       tau: (x, y) => Math.hypot(x - o.x, y - o.y) / speed,
       edge(rect, front, inner, outer, soft) {
@@ -762,7 +768,10 @@ function motionField(kind, dir = 1, origin = null) {
       },
     };
   }
-  const [kx, ky] = kind === 'cascade' ? [1.2, 26] : [6, 9]; // ms per column, per row
+  // The shape (ms per column : ms per row), scaled so the far corner is reached in WAVE_MS.
+  const [ax, ay] = kind === 'cascade' ? [1.2, 26] : [6, 9];
+  const k = WAVE_MS / Math.max(1, ax * (board.cols - 1) + ay * (board.fullRows - 1));
+  const [kx, ky] = [ax * k, ay * k];
   const tau = (x, y) => kx * flip(colOf(x)) + ky * rowOf(y);
   const gx = ((kx * dpr) / board.cw) * (dir > 0 ? 1 : -1);
   const gy = (ky * dpr) / board.ch;
@@ -1024,8 +1033,8 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
 
   const field = motionField(look.motion, dir, origin);
   const ahead = 100; // edges fade in over this long, reaching full strength as the switch flips
-  const STEP = 110;
-  const DUR = 210;
+  const STEP = FLIP_STEP;
+  const DUR = FLIP_DUR;
   let span = 0;
   retarget(
     allCells(),
@@ -1245,7 +1254,7 @@ async function switchTheme(dark, preShots = null) {
   }
   const field = motionField('ripple', 1, origin);
   const ahead = 70; // the switch has already answered; the ripple follows straight away
-  veilWipe(field, ahead + 30 + 105 + 90, 1000); // the front sits where switches are half-way through
+  veilWipe(field, ahead + 30 + FLIP_STEP + FLIP_DUR / 2, WAVE_MS); // the front sits where switches are half-way through
   let end = 0;
   retarget(
     allCells(),
@@ -1263,8 +1272,8 @@ async function switchTheme(dark, preShots = null) {
         const b = faceColour(to);
         if (a && b && a !== b) steps = levels.map((n) => solid(mixHex(a, b, BLENDS[n])));
       }
-      const stepDur = 110;
-      const dur = 180;
+      const stepDur = FLIP_STEP;
+      const dur = FLIP_DUR;
       end = Math.max(end, delay + (steps ? steps.length : 0) * stepDur + dur + 200);
       const base = { delay, dur, gap: board.gapColor, steps, stepDur };
       return onBox ? { ...base, edgesIn: ahead, edgesOut: S.overlay.has(i) ? 170 : 0 } : base;
