@@ -1239,7 +1239,13 @@ function finishWeb() {
   resetEdges();
   // Every switch settles at once (nothing left half-flipped), in this theme's gutter.
   for (const c of board.cells) c.gap = null;
-  retarget(allCells(), null, (i) => board.busy(i) || board.cells[i].cur?.t === 'slice');
+  // Only switches still showing (or on their way to) a piece of a card are settled at once;
+  // background switches already drifting again are left to finish their flips.
+  const onCard = (i) => {
+    const c = board.cells[i];
+    return c.cur?.t === 'slice' || c.anim?.to?.t === 'slice' || c.q.some((n) => n.f?.t === 'slice');
+  };
+  retarget(allCells(), null, onCard);
   board.redrawAll();
   if (!reduce.matches) paintStep(performance.now()); // the background drift carries straight on
   schedulePrefetch();
