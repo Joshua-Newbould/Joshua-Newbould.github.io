@@ -31,7 +31,7 @@ JavaScript read it directly.
 
 ## Design options
 
-Five design decisions each have three variations, defined in `js/design.js`:
+Six design decisions have two or three variations each, defined in `js/design.js`:
 
 | Decision | Options (default first) |
 | --- | --- |
@@ -40,14 +40,15 @@ Five design decisions each have three variations, defined in `js/design.js`:
 | Header & footer | Hairline · Floating · Frame |
 | Display type | Space Grotesk · Inter Tight · Chakra Petch |
 | Transition | Sweep · Ripple · Cascade |
+| Sections | Window · Plain (also on the temporary square button in the header) |
 
 Press **D** (or open `?design`) for a panel to switch them live, or set them in the URL, e.g.
-`?palette=graphite&bg=contour&chrome=frame&font=chakra&motion=ripple`. The choice is
+`?palette=graphite&bg=contour&chrome=frame&font=chakra&motion=ripple&card=plain`. The choice is
 remembered in the browser. To settle on one for good, change `DEFAULT_LOOK` in `js/design.js`.
 
 Colours are built in OKLCH, so lightness and colourfulness stay even across each page's hue
 (About rose, Research periwinkle, Publications lavender, Contact sea green), held in a soft band
-of lightness in both themes.
+of lightness in both themes; the title screen is cool silver and white.
 
 ## How it works
 
@@ -76,7 +77,7 @@ while the page is idle, so a click starts flipping within a frame or two.
 
 Use the header nav, the footer ‹ › buttons or the arrow keys to move between pages. Any
 click or key on the title screen enters (clicking the name in the header returns to it).
-Press and hold (or drag) anywhere to paint flaps; they drift back on their own. The sun/moon
+Turn on the brush button in the header, then press and hold (or drag) anywhere to paint flaps; they drift back on their own. The sun/moon
 switch ripples between light and dark. Reduced-motion preferences are respected.
 
 ## Credits
