@@ -1105,21 +1105,16 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
   const STEP = FLIP_STEP;
   const DUR = FLIP_DUR;
   let span = 0;
-  // Changing page, every switch passes through a colour of the new page's palette, taken from
-  // a smooth field (the background's own pattern at another moment), so neighbouring switches
-  // pass through neighbouring colours and the wave reads as soft bands of colour. Flipping
-  // between parts of one card keeps a quiet half-way blend.
-  const wave = samePage ? null : paint.frame(S.pt + 37.3, scheme()).rgb;
   retarget(
     allCells(),
     (i, to) => {
       const delay = ahead + field.tau(...cellCentre(i)) + rand() * 25;
+      // One soft step half-way between what the switch shows now and where it is going (so a
+      // card's switches stay close to the card's colours as they flip).
       const from = board.cells[i].cur;
       const a = faceColour(from);
       const b = faceColour(to);
-      let steps = null;
-      if (wave) steps = [solid(rgbHex(wave[i * 3], wave[i * 3 + 1], wave[i * 3 + 2]))];
-      else if (a && b && a !== b) steps = [solid(mixHex(a, b, 0.5))];
+      const steps = a && b && a !== b ? [solid(mixHex(a, b, 0.5))] : null;
       span = Math.max(span, delay);
       return { delay, dur: DUR, steps, stepDur: STEP, gap: board.gapColor, edgesIn: ahead, edgesOut: S.overlay.has(i) ? 170 : 0 };
     },
