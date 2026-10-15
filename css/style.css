@@ -1,0 +1,806 @@
+/* ==========================================================================
+   Fonts (self-hosted)
+   ========================================================================== */
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("../assets/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("../assets/fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2");
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("../assets/fonts/ibm-plex-mono-latin-600-normal.woff2") format("woff2");
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Space Grotesk";
+  src: url("../assets/fonts/space-grotesk-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter Tight";
+  src: url("../assets/fonts/inter-tight-latin-800-normal.woff2") format("woff2");
+  font-weight: 800;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Chakra Petch";
+  src: url("../assets/fonts/chakra-petch-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+
+/* ==========================================================================
+   Tokens. The script sets the colours per page and theme; these are the plain-page defaults.
+   ========================================================================== */
+
+:root {
+  --surface: #f7f4ef;
+  --bar: #f1ede6;
+  --line: #ddd6cb;
+  --text: #2b2520;
+  --soft: #4a433c;
+  --muted: #7a7168;
+  --accent: #9a5a2c;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --display: "Space Grotesk", "Inter Tight", "Helvetica Neue", Arial, sans-serif;
+  --display-weight: 700;
+  --display-track: -0.02em;
+  --shadow: rgb(0 0 0 / 0.26);
+}
+[data-font="inter"] {
+  --display: "Inter Tight", "Helvetica Neue", Arial, sans-serif;
+  --display-weight: 800;
+  --display-track: -0.025em;
+}
+[data-font="chakra"] {
+  --display: "Chakra Petch", "Space Grotesk", Arial, sans-serif;
+  --display-weight: 700;
+  --display-track: 0;
+}
+[data-theme="dark"] {
+  --shadow: rgb(0 0 0 / 0.55);
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--gapc, var(--bar));
+}
+
+/* ==========================================================================
+   The site: a board of switches (canvas) with web sections snapped onto it
+   ========================================================================== */
+
+.js,
+.js body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+#board {
+  position: fixed;
+  top: 0;
+  left: 0;
+  display: block;
+  touch-action: pinch-zoom;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.js #source {
+  position: fixed;
+  inset: 0;
+  overflow: clip;
+  pointer-events: none; /* the board underneath takes the brush */
+  font: 400 13px/1.65 var(--mono);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+.js #source [hidden] {
+  display: none !important;
+}
+/* Until the board is running, show nothing rather than unplaced sections on top of each other. */
+.js:not(.board) #source {
+  visibility: hidden;
+}
+.js #site {
+  position: absolute;
+  inset: 0;
+}
+
+/* Boxes are placed on the grid by the script (left/top/width/height, whole switches). */
+.js #site > header,
+.js #site > footer,
+.js main section[data-page],
+.js #intro {
+  position: absolute;
+  box-sizing: border-box;
+  margin: 0;
+  pointer-events: auto;
+}
+
+.js a {
+  color: var(--accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.js a:hover {
+  color: var(--text);
+}
+.js :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.js [tabindex="-1"]:focus {
+  outline: none;
+}
+.js button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* ---------- Header ---------- */
+
+.js #site > header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem 2rem;
+  padding: 0 calc(var(--inset, 2rem) + 28px);
+  background: var(--bar);
+}
+#site-name {
+  font: 600 11.5px/1 var(--mono);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--text) !important;
+  white-space: nowrap;
+}
+#site-nav {
+  display: flex;
+  gap: 1.9rem;
+  margin-left: auto;
+}
+#site-nav a {
+  position: relative;
+  white-space: nowrap;
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--muted);
+  padding: 6px 0;
+}
+#site-nav a:hover,
+#site-nav a[aria-current="page"] {
+  color: var(--text);
+}
+/* The current page: a short accent rule under the label. */
+#site-nav a[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 1px;
+  background: var(--accent);
+}
+
+/* ---------- Footer ---------- */
+
+.js #site > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0 calc(var(--inset, 2rem) + 28px);
+  background: var(--bar);
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.js #site > footer p {
+  margin: 0;
+}
+.sep {
+  margin: 0 0.6em;
+  opacity: 0.5;
+}
+.foot-nav {
+  display: flex;
+  gap: 2rem;
+}
+.foot-nav button {
+  white-space: nowrap;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--muted);
+}
+.foot-nav button:hover {
+  color: var(--text);
+}
+
+/* ---------- Header & footer styles ---------- */
+
+/* Hairline: flat, full width, a single rule against the content. */
+[data-chrome="hairline"] #site > header {
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+[data-chrome="hairline"] #site > footer {
+  box-shadow: inset 0 1px 0 var(--line);
+}
+
+/* Floating: inset panels the width of the content, outlined. */
+[data-chrome="floating"] #site > header,
+[data-chrome="floating"] #site > footer {
+  box-shadow: inset 0 0 0 1px var(--line);
+  padding: 0 28px;
+}
+
+/* Frame: inset panels with corner brackets, like an instrument panel. */
+[data-chrome="frame"] #site > header,
+[data-chrome="frame"] #site > footer,
+[data-chrome="frame"] main section[data-page],
+[data-chrome="frame"] #intro {
+  --br: var(--accent);
+  --bl: 14px;
+  background-image:
+    linear-gradient(var(--br), var(--br)), linear-gradient(var(--br), var(--br)),
+    linear-gradient(var(--br), var(--br)), linear-gradient(var(--br), var(--br)),
+    linear-gradient(var(--br), var(--br)), linear-gradient(var(--br), var(--br)),
+    linear-gradient(var(--br), var(--br)), linear-gradient(var(--br), var(--br));
+  background-size:
+    var(--bl) 1px, 1px var(--bl), var(--bl) 1px, 1px var(--bl),
+    var(--bl) 1px, 1px var(--bl), var(--bl) 1px, 1px var(--bl);
+  background-position:
+    top left, top left, top right, top right,
+    bottom left, bottom left, bottom right, bottom right;
+  background-repeat: no-repeat;
+}
+[data-chrome="frame"] #site > header,
+[data-chrome="frame"] #site > footer {
+  padding: 0 28px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 70%, transparent);
+}
+[data-chrome="frame"] #site-nav {
+  counter-reset: nav;
+}
+[data-chrome="frame"] #site-nav a::before {
+  counter-increment: nav;
+  content: "0" counter(nav) " ";
+  color: var(--accent);
+  opacity: 0.8;
+}
+
+/* ---------- Sun / moon switch ---------- */
+
+#theme-toggle {
+  flex-shrink: 0;
+  line-height: 0;
+  border-radius: 999px;
+}
+.tt-track {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.tt-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bar);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: transform 0.35s cubic-bezier(0.3, 1.3, 0.5, 1);
+}
+.tt-knob svg {
+  position: absolute;
+  inset: 3px;
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: opacity 0.25s ease, transform 0.35s ease;
+}
+.tt-moon {
+  opacity: 0;
+  transform: rotate(-60deg) scale(0.6);
+}
+#theme-toggle[aria-checked="true"] .tt-knob {
+  transform: translateX(22px);
+}
+#theme-toggle[aria-checked="true"] .tt-sun {
+  opacity: 0;
+  transform: rotate(60deg) scale(0.6);
+}
+#theme-toggle[aria-checked="true"] .tt-moon {
+  opacity: 1;
+  transform: none;
+}
+#theme-toggle:focus-visible {
+  outline: none;
+}
+#theme-toggle:focus-visible .tt-track {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- Page cards ---------- */
+
+.js main section[data-page] {
+  overflow: hidden; /* contents scale down to fit (see the script); pages never scroll */
+  padding: 30px 40px;
+  background: var(--surface);
+}
+.w-fit {
+  display: block;
+}
+.js main h2 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.w-index {
+  margin: 0 0 16px;
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.w-index b {
+  font-weight: 500;
+  color: var(--accent);
+  margin-right: 0.9em;
+}
+.w-big {
+  margin: 0 0 18px;
+  font-family: var(--display);
+  font-weight: var(--display-weight);
+  font-size: clamp(30px, 3.6vw, 54px);
+  line-height: 1;
+  letter-spacing: var(--display-track);
+  text-transform: uppercase;
+  color: var(--text);
+}
+.js [data-strip] {
+  margin: 0;
+  font: 500 11px/1.9 var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--soft);
+}
+.js [data-strip] + [data-strip] {
+  color: var(--accent);
+}
+.js main dl {
+  display: grid;
+  grid-template-columns: minmax(8.5rem, max-content) 1fr;
+  gap: 4px 1.5rem;
+  margin: 26px 0 0;
+}
+.js main dl > div {
+  display: contents;
+}
+.js main dt {
+  font: 500 10.5px/2.1 var(--mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.js main dd {
+  margin: 0;
+}
+.js .bio p {
+  margin: 18px 0 0;
+  max-width: 76ch;
+  color: var(--soft);
+}
+.js #research ul {
+  list-style: none;
+  padding: 0;
+  margin: 26px 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 26px 40px;
+}
+.js #research h3 {
+  margin: 8px 0 6px;
+  font: 600 12px/1.5 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.js #research li p {
+  margin: 0;
+  color: var(--soft);
+}
+.w-code,
+.w-year,
+.w-status {
+  display: block;
+  font: 500 10.5px/1.9 var(--mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.js #publications ol {
+  list-style: none;
+  padding: 0;
+  margin: 22px 0 0;
+}
+.js #publications li {
+  display: grid;
+  grid-template-columns: 5rem 1fr auto;
+  gap: 0 1.5rem;
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+.js #publications .w-year {
+  grid-column: 1;
+  grid-row: 1 / span 3;
+  color: var(--muted);
+}
+.js #publications .w-status {
+  grid-column: 3;
+  grid-row: 1;
+}
+.js .pub-title,
+.js .pub-authors,
+.js .pub-venue {
+  grid-column: 2;
+}
+.js .pub-title {
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+}
+.js .pub-title:hover {
+  color: var(--accent);
+}
+.js .pub-authors,
+.js .pub-venue {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* About: facts beside the biography on wide screens (and on short landscape ones, where
+   stacking would not fit). Window-size classes (data-vp) are set by the script rather than
+   media queries, because section snapshots are rendered at the section's own size. */
+.js[data-vp~="wide"] #about .w-fit {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.25fr);
+  column-gap: 56px;
+  align-items: start;
+}
+.js[data-vp~="wide"] #about .w-fit > :not(dl):not(.bio) {
+  grid-column: 1 / -1;
+}
+.js[data-vp~="wide"] #about .w-fit > dl {
+  grid-column: 1;
+}
+.js[data-vp~="wide"] #about .w-fit > .bio {
+  grid-column: 2;
+  margin-top: 8px;
+}
+
+/* ---------- Title screen ---------- */
+
+.js #intro {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 calc(var(--inset, 2rem) + 28px);
+  background: var(--surface);
+}
+.js #intro h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: var(--display-weight);
+  font-size: clamp(40px, 7.4vw, 116px);
+  line-height: 0.95;
+  letter-spacing: var(--display-track);
+  text-transform: uppercase;
+  color: var(--text);
+}
+.js #intro p {
+  margin: 16px 0 0;
+  font: 500 12px/1 var(--mono);
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+/* Keyboard users can Tab to an "Enter site" button; it shows only while focused. */
+.js #enter {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 6px 10px;
+  opacity: 0;
+  pointer-events: none;
+}
+.js #enter:focus-visible {
+  opacity: 1;
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Floating and Frame: the title sits on a centred card rather than a band. */
+[data-chrome="floating"] #intro,
+[data-chrome="frame"] #intro {
+  padding: 0 48px;
+  align-items: center;
+  text-align: center;
+}
+
+/* ---------- Layers ---------- */
+
+/* Card shadows: two layers, so the old one can leave and the new one arrive with the wave.
+   The shadow is drawn PAD px inside each layer, so a mask can cover the whole blur. */
+.card-shadow {
+  position: fixed;
+  pointer-events: none;
+  opacity: 0;
+}
+.card-shadow::before {
+  content: "";
+  position: absolute;
+  inset: 60px;
+  box-shadow: 0 26px 50px -22px var(--shadow);
+}
+/* Old-theme copies of the header and footer, wiped away during a theme change. */
+#theme-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+#theme-veil canvas {
+  position: fixed;
+}
+/* While painting, dragging over text paints rather than selects it. */
+.painting,
+.painting * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+/* ---------- Design options panel (for reviewing the variations) ---------- */
+
+#design-options {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 20;
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  padding: 14px 16px 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--line), 0 18px 40px -16px var(--shadow);
+  font: 500 11px/1.4 var(--mono);
+  letter-spacing: 0.08em;
+}
+#design-options[hidden] {
+  display: none;
+}
+.do-title {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.do-hint {
+  margin: 2px 0 10px;
+  color: var(--muted);
+}
+.do-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.do-row > span {
+  width: 9.5rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+#design-options button {
+  font: inherit;
+  padding: 5px 9px;
+  color: var(--soft);
+  background: none;
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--line);
+  cursor: pointer;
+}
+#design-options button[aria-pressed="true"] {
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* ---------- Small and short screens ----------
+   Classes, not media queries: section snapshots are rendered at the section's own size, where
+   media queries would answer for the snapshot rather than the window. The script sets the
+   window's size classes on the root (data-vp: phone, wide, short) and picks the header and
+   footer layouts by measuring what fits: compact (tighter padding), stack (nav on its own
+   row), tight (tighter labels), nocopy (footer without the copyright line). */
+
+.js #site > header.compact,
+.js #site > footer.compact {
+  padding: 0 20px;
+  gap: 1.25rem;
+}
+.js #site > header.compact #site-nav {
+  gap: 1.3rem;
+}
+.js #site > header.stack {
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  gap: 12px 16px;
+}
+.js #site > header.stack #site-nav {
+  order: 3;
+  width: 100%;
+  margin: 0;
+  justify-content: space-between;
+  gap: 10px;
+}
+.js #site > header.stack #theme-toggle {
+  margin-left: auto;
+}
+.js #site > header.tight #site-nav {
+  gap: 8px;
+}
+.js #site > header.tight #site-nav a {
+  letter-spacing: 0.08em;
+}
+/* The Frame style's page numbers would crowd tight labels. */
+.js #site > header.tight #site-nav a::before {
+  display: none;
+}
+.js #site > footer p {
+  white-space: nowrap;
+}
+.js #site > footer.nocopy p {
+  display: none;
+}
+.js #site > footer.nocopy .foot-nav {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.js[data-vp~="short"] main section[data-page] {
+  padding: 18px 26px;
+}
+/* A card that cannot fit even scaled right down scrolls on its own (the page never does). */
+.js main section[data-page].overflowing {
+  overflow-y: auto;
+  touch-action: pan-y;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.js[data-vp~="phone"] #site > footer {
+  padding: 0 16px;
+}
+.js[data-vp~="phone"] main section[data-page] {
+  padding: 20px 18px;
+}
+.js[data-vp~="phone"] #publications li {
+  grid-template-columns: 1fr;
+}
+.js[data-vp~="phone"] #publications .w-year,
+.js[data-vp~="phone"] #publications .w-status,
+.js[data-vp~="phone"] .pub-title,
+.js[data-vp~="phone"] .pub-authors,
+.js[data-vp~="phone"] .pub-venue {
+  grid-column: 1;
+  grid-row: auto;
+}
+.js[data-vp~="phone"] #intro {
+  padding: 0 20px;
+}
+@media (max-width: 640px) {
+  .do-row > span {
+    width: 100%;
+  }
+}
+
+/* ==========================================================================
+   Plain page (no JavaScript)
+   ========================================================================== */
+
+html:not(.js) #board,
+html:not(.js) #enter,
+html:not(.js) #theme-toggle,
+html:not(.js) .foot-nav {
+  display: none;
+}
+html:not(.js) body {
+  background: var(--surface);
+}
+html:not(.js) #source {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 3rem 1.25rem 5rem;
+  font: 400 15px/1.7 var(--mono);
+  color: var(--text);
+}
+html:not(.js) h1 {
+  font-family: var(--display);
+  font-weight: var(--display-weight);
+  font-size: clamp(2.6rem, 10vw, 5rem);
+  line-height: 1;
+  text-transform: uppercase;
+  margin: 0.25em 0;
+}
+html:not(.js) h2 {
+  color: var(--accent);
+  font-size: 0.85rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin-top: 3rem;
+}
+html:not(.js) a {
+  color: var(--accent);
+}
+html:not(.js) nav a {
+  margin-right: 1rem;
+}
+html:not(.js) dt {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+}
+html:not(.js) dd {
+  margin: 0 0 0.75rem;
+}
+html:not(.js) li {
+  margin-bottom: 1rem;
+}
+html:not(.js) .pub-title,
+html:not(.js) .pub-authors,
+html:not(.js) .pub-venue {
+  display: block;
+}
+html:not(.js) .pub-authors,
+html:not(.js) .pub-venue,
+html:not(.js) footer {
+  color: var(--muted);
+}

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Joshua Newbould</title>
+  <meta name="description" content="Joshua Newbould — PhD student in generative modelling, flow matching and decentralised training at Durham University.">
+  <meta name="theme-color" content="#e9e4dc">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='3' fill='%23111'/%3E%3Cpath d='M0 15.5h32' stroke='%23000' stroke-width='1.5'/%3E%3Ctext x='16' y='22.5' font-family='monospace' font-size='17' font-weight='700' fill='%23ffb31a' text-anchor='middle'%3EJN%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+  <script>
+    document.documentElement.classList.add('js');
+    // If the board never starts (blocked module, file://, old browser), show the plain page instead.
+    addEventListener('load', function () {
+      setTimeout(function () {
+        var c = document.documentElement.classList;
+        if (!c.contains('board')) c.remove('js');
+      }, 1500);
+    });
+  </script>
+  <script type="module" src="js/main.js"></script>
+</head>
+<body id="top">
+  <!-- The visible site: one split-flap board. Everything in #source is drawn onto it. -->
+  <canvas id="board" aria-hidden="true"></canvas>
+
+  <!-- Source of truth for all content. Screen readers and keyboard users use it directly;
+       without JavaScript it is shown as a plain page. Each section with data-page is one board page. -->
+  <div id="source">
+    <section id="intro" aria-label="Welcome">
+      <h1 data-short="Josh N">Joshua Newbould</h1>
+      <p>PhD student</p>
+      <button type="button" id="enter">Enter site</button>
+    </section>
+
+    <div id="site">
+      <header>
+        <a href="#" id="site-name">Joshua Newbould</a>
+        <nav id="site-nav" aria-label="Pages">
+          <a href="#about">About</a>
+          <a href="#research">Research</a>
+          <a href="#publications" data-short="Papers">Publications</a>
+          <a href="#contact">Contact</a>
+        </nav>
+        <button type="button" id="theme-toggle" role="switch" aria-checked="false" aria-label="Dark mode">
+          <span class="tt-track" aria-hidden="true">
+            <span class="tt-knob">
+              <svg class="tt-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/></svg>
+              <svg class="tt-moon" viewBox="0 0 24 24"><path d="M19.5 14.5A8 8 0 0 1 9.5 4.5a8 8 0 1 0 10 10z"/></svg>
+            </span>
+          </span>
+        </button>
+      </header>
+
+      <main>
+        <section id="about" data-page data-big="Joshua Newbould" data-big-short="Josh N" data-label="Profile" aria-labelledby="about-title">
+          <h2 id="about-title">About</h2>
+          <p data-strip>Generative modelling · Flow matching · Decentralised training</p>
+          <p data-strip>Department of Computer Science, Durham University</p>
+          <dl>
+            <div><dt>Position</dt><dd>PhD student</dd></div>
+            <div><dt>Institution</dt><dd>Durham University</dd></div>
+            <div><dt>Department</dt><dd>Computer Science</dd></div>
+            <div><dt>Focus</dt><dd>Generative models, flow matching, decentralised training</dd></div>
+            <div><dt>Profile</dt><dd><a href="https://scholar.google.com/citations?user=QLRUHvEAAAAJ&amp;hl=en">Google Scholar</a></dd></div>
+          </dl>
+          <div class="bio">
+            <p>I am a PhD student at Durham University working on generative models, in particular flow matching, and on how to train them without hyperscale infrastructure.</p>
+            <p>My recent work, GridFlow, partitions the flow matching objective across both data and time, so a grid of independent blocks can be trained in isolation. This lowers per-device memory and inference cost, and at matched training compute the best grids outperform a single monolithic model on CIFAR-10. It was presented as an oral at the NeurIPS 2026 workshop on decentralised training of foundation models.</p>
+            <p>More broadly, I am interested in making large-scale generative modelling practical on smaller, distributed hardware, and in careful evaluation of what AI systems can do. I am a contributor to Humanity's Last Exam, published in Nature.</p>
+          </div>
+        </section>
+
+        <section id="research" data-page data-big="Research" data-label="4 areas" aria-labelledby="research-title">
+          <h2 id="research-title">Research</h2>
+          <p data-strip>Current interests</p>
+          <ul>
+            <li data-code="RS-01">
+              <h3>Flow matching and generative models</h3>
+              <p>Training and sampling generative models with flow matching, and how the objective can be split across data and time.</p>
+            </li>
+            <li data-code="RS-02">
+              <h3>Decentralised, communication-free training</h3>
+              <p>Training large models as independent experts and time blocks, without synchronisation between devices.</p>
+            </li>
+            <li data-code="RS-03">
+              <h3>Efficient large-scale generation</h3>
+              <p>Reducing per-device memory and inference cost so strong generative models can be built on distributed, high-latency hardware.</p>
+            </li>
+            <li data-code="RS-04">
+              <h3>Evaluating AI capabilities</h3>
+              <p>Expert-level benchmarks that probe the frontier of what AI systems can and cannot do.</p>
+            </li>
+          </ul>
+        </section>
+
+        <section id="publications" data-page data-big="Publications" data-big-short="Papers" data-label="2026" aria-labelledby="publications-title">
+          <h2 id="publications-title">Publications</h2>
+          <p data-strip>Selected work, newest first</p>
+          <ol reversed>
+            <li data-year="2026" data-status="Oral">
+              <a class="pub-title" href="https://openreview.net/forum?id=0FddZoRO3w">GridFlow: Decentralized Block-Based Flow Matching.</a>
+              <span class="pub-authors">J. Newbould, M. Jian, T. Vasantam &amp; C. G. Willcocks.</span>
+              <span class="pub-venue">NeurIPS 2026 Workshop on Collaborative, Open, and Decentralized Training of Foundation Models (CODEC-FM).</span>
+            </li>
+            <li data-year="2026" data-status="Published">
+              <a class="pub-title" href="https://doi.org/10.1038/s41586-025-09962-4">A benchmark of expert-level academic questions to assess AI capabilities (Humanity's Last Exam).</a>
+              <span class="pub-authors">Center for AI Safety, Scale AI &amp; HLE contributors, including J. Newbould.</span>
+              <span class="pub-venue">Nature, 2026.</span>
+            </li>
+          </ol>
+        </section>
+
+        <section id="contact" data-page data-big="Contact" data-label="Links" aria-labelledby="contact-title">
+          <h2 id="contact-title">Contact</h2>
+          <p data-strip>Research, collaboration and talks</p>
+          <dl>
+            <div><dt>Scholar</dt><dd><a href="https://scholar.google.com/citations?user=QLRUHvEAAAAJ&amp;hl=en">Google Scholar profile</a></dd></div>
+            <div><dt>GridFlow</dt><dd><a href="https://openreview.net/forum?id=0FddZoRO3w">OpenReview</a></dd></div>
+            <div><dt>Department</dt><dd>Computer Science, Durham University</dd></div>
+            <div><dt>Location</dt><dd>Durham, United Kingdom</dd></div>
+          </dl>
+        </section>
+      </main>
+
+      <footer>
+        <p data-board="copyright">© 2026 Joshua Newbould <span class="sep" aria-hidden="true">/</span> Durham</p>
+        <nav class="foot-nav" aria-label="Page">
+          <button type="button" data-board="prev"><span aria-hidden="true">←</span> <span class="lbl">Previous page</span></button>
+          <button type="button" data-board="next"><span class="lbl">Next page</span> <span aria-hidden="true">→</span></button>
+        </nav>
+      </footer>
+    </div>
+  </div>
+</body>
+</html>
