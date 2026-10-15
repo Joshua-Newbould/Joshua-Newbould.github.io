@@ -509,22 +509,22 @@ function fitCard(pg, fits, cap, room, phone) {
   }
   if (!done) pg.parts = split(cap); // (nothing fits even small: keep the last split)
   pg.part = Math.max(0, pg.parts.findIndex((p) => p.includes(keepUnit)));
-  // Every part gets the height of the tallest, so flicking through them doesn't resize the card.
-  let tallest = 1;
+  // Each part is as tall as its own content (the wave flips the card between sizes), so a
+  // short last part doesn't leave an empty card.
+  let heights = [];
   pg.rows = (rowsFor, span) => {
     if (pg.heightKey !== pg.fitKey) {
       const keep = pg.part;
-      tallest = 1;
-      for (let k = 0; k < pg.parts.length; k++) {
+      heights = pg.parts.map((_, k) => {
         pg.part = k;
         showPart(pg);
-        tallest = Math.max(tallest, Math.min(room, rowsFor(pg.el, span)));
-      }
+        return Math.min(room, rowsFor(pg.el, span));
+      });
       pg.part = keep;
       showPart(pg);
       pg.heightKey = pg.fitKey;
     }
-    return tallest;
+    return heights[pg.part] || 1;
   };
   pg.heightKey = null;
   showPart(pg);
@@ -765,10 +765,12 @@ async function prefetchShots() {
       if (k === keep) continue;
       pg.part = k;
       showPart(pg);
+      layoutWebBoxes(); // each part has its own height
       shots.push(snapshot(pg.el));
     }
     pg.part = keep;
     showPart(pg);
+    layoutWebBoxes();
     return shots;
   });
   // The visible card (or title) in the other theme, so the theme switch starts at once too.
@@ -1070,6 +1072,7 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
   }
   const before = new Set(S.overlay.keys());
   const oldCard = fromNothing ? null : morphBox();
+  const oldRect = oldCard?.getBoundingClientRect();
   if (!fromNothing) {
     const [added, ...bars] = await Promise.all([
       boxesToSwitches(waveBoxes(fromKey, toKey)),
@@ -1117,7 +1120,11 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
   );
   // Shadow and bars: the old shadow goes as the front arrives, the new one comes as switches land.
   const land = ahead + 30 + STEP + DUR;
-  shadowWave(field, oldCard, morphBox(), ahead, land + 90, span);
+  // (A card that stays where it is, flipping to another part or style, keeps its shadow as it is.)
+  const newCard = morphBox();
+  const r = newCard?.getBoundingClientRect();
+  const still = samePage && oldRect && r && ['left', 'top', 'width', 'height'].every((k) => Math.abs(oldRect[k] - r[k]) < 1);
+  if (!still) shadowWave(field, oldCard, newCard, ahead, land + 90, span);
   if (barsSweep || freezeVeil) veilWipe(field, ahead + 30 + STEP + DUR / 2, span);
   await wait(Math.min(span + land + 220, 3200));
   if (token !== morphToken) return;

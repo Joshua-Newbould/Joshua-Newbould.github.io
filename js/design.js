@@ -57,7 +57,7 @@ export function oklch(L, C, h) {
 // Schemes
 
 // Each page's hue identity (degrees, OKLCH).
-const PAGE_HUE = { about: 0, research: 240, publications: 305, contact: 168 };
+const PAGE_HUE = { about: 48, research: 240, publications: 305, contact: 168 };
 
 // Per palette: the hue the neutrals lean towards, and how each page's paint is built.
 const PALETTES = {
@@ -66,9 +66,16 @@ const PALETTES = {
   mineral: {
     neutral: (h) => h,
     pigments(h, dark) {
-      const hues = [h - 18, h - 6, h + 6, h + 18, h - 12, h + 12];
-      const L = dark ? [0.4, 0.45, 0.5, 0.37, 0.43, 0.48] : [0.74, 0.79, 0.84, 0.87, 0.77, 0.82];
-      const C = dark ? [0.075, 0.08, 0.075, 0.06, 0.07, 0.065] : [0.085, 0.08, 0.075, 0.06, 0.085, 0.07];
+      // Warm hues (apricot, coral) go brown when dark, so a warm page keeps a lighter, clearer
+      // band in dark mode than the cool pages do.
+      const warm = h > 15 && h < 100;
+      const hues = warm ? (dark ? [h - 20, h - 12, h - 2, h + 6, h - 16, h] : [h - 14, h - 4, h + 6, h + 16, h - 9, h + 11]) : [h - 18, h - 6, h + 6, h + 18, h - 12, h + 12];
+      const L = dark
+        ? warm ? [0.6, 0.65, 0.7, 0.57, 0.62, 0.68] : [0.4, 0.45, 0.5, 0.37, 0.43, 0.48]
+        : warm ? [0.77, 0.82, 0.87, 0.9, 0.8, 0.85] : [0.74, 0.79, 0.84, 0.87, 0.77, 0.82];
+      const C = dark
+        ? warm ? [0.125, 0.12, 0.1, 0.11, 0.12, 0.1] : [0.075, 0.08, 0.075, 0.06, 0.07, 0.065]
+        : warm ? [0.095, 0.09, 0.08, 0.065, 0.095, 0.075] : [0.085, 0.08, 0.075, 0.06, 0.085, 0.07];
       return hues.map((x, k) => oklch(L[k], C[k], x));
     },
   },
