@@ -97,20 +97,33 @@ const PALETTES = {
 
 const cache = new Map();
 
+/** The title screen's paint: a soft mix of every page's colours (Graphite stays grey). */
+function introPigments(palette, dark) {
+  if (palette === 'graphite') {
+    const greys = dark ? [0.15, 0.19, 0.23, 0.27, 0.21, 0.13] : [0.84, 0.88, 0.92, 0.95, 0.9, 0.8];
+    return greys.map((l) => oklch(l, 0.008, dark ? 255 : 75));
+  }
+  if (palette === 'nebula') return PALETTES.nebula.pigments(285, dark);
+  // Rose, orchid, lavender, periwinkle, sky, lilac: in order round the wheel, so neighbours
+  // blend into each other cleanly (never through grey).
+  const hues = [14, 340, 295, 250, 220, 300];
+  const L = dark ? [0.42, 0.46, 0.44, 0.48, 0.5, 0.43] : [0.78, 0.82, 0.8, 0.84, 0.86, 0.81];
+  const C = dark ? [0.07, 0.075, 0.075, 0.07, 0.06, 0.07] : [0.075, 0.075, 0.075, 0.07, 0.06, 0.07];
+  return hues.map((x, k) => oklch(L[k], C[k], x));
+}
+
 /** The colours for one page (or 'intro') in one theme under a look. */
 export function scheme(page, dark, look) {
   const id = [page, dark ? 'd' : 'l', look.palette].join('|');
   if (cache.has(id)) return cache.get(id);
   const pal = PALETTES[look.palette];
   const intro = page === 'intro';
-  const h = intro ? pal.neutral(70, dark) : PAGE_HUE[page] ?? 60;
+  const h = intro ? (look.palette === 'mineral' ? 300 : pal.neutral(70, dark)) : PAGE_HUE[page] ?? 60;
   const hs = pal.neutral(h, dark); // hue the neutral surfaces lean towards
   const tint = look.palette === 'graphite' ? 0.006 : 0.012;
-  const greys = dark ? [0.15, 0.19, 0.23, 0.27, 0.21, 0.13] : [0.84, 0.88, 0.92, 0.95, 0.9, 0.8];
   const sc = {
     name: page,
-    // The title screen's paint is a quiet grey of the palette's neutral.
-    pigments: intro ? greys.map((l) => oklch(l, 0.008, hs)) : pal.pigments(h, dark),
+    pigments: intro ? introPigments(look.palette, dark) : pal.pigments(h, dark),
     surface: dark ? oklch(0.205, tint, hs) : oklch(0.975, tint * 0.6, hs),
     bar: dark ? oklch(0.175, tint, hs) : oklch(0.955, tint * 0.8, hs),
     line: dark ? oklch(0.32, tint * 1.2, hs) : oklch(0.88, tint * 1.2, hs),
@@ -124,7 +137,7 @@ export function scheme(page, dark, look) {
   };
   // Brush colours: the page's hues nudged round the wheel, a touch more colourful, never white.
   sc.brush = intro
-    ? [sc.accent]
+    ? [14, 300, 250].map((x) => oklch(dark ? 0.54 : 0.68, 0.09, x))
     : [-16, 0, 14, 26].map((d) => oklch(dark ? 0.54 : 0.68, look.palette === 'graphite' ? 0.07 : 0.09, h + 18 + d));
   cache.set(id, sc);
   return sc;

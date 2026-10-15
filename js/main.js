@@ -325,8 +325,9 @@ function layoutWebBoxes() {
   const all = board.cols;
   const narrow = board.cssW < 640;
   const margin = narrow ? 1 : 2;
-  // Content is wide (up to ~1280px) and centred; on phones it leaves a wider band of board.
-  const span = Math.min(board.cols - (narrow ? 6 : 2 * margin * 2), Math.ceil(1280 / cw));
+  // Cards are a comfortable reading width (up to ~880px) and centred, leaving plenty of board;
+  // on phones too there is a band of board either side.
+  const span = Math.min(board.cols - (narrow ? 6 : 2 * margin * 2), Math.ceil(880 / cw));
   const c0 = Math.floor((board.cols - span) / 2);
   const inset = look.chrome !== 'hairline'; // Floating & Frame: header and footer as wide as the content
   const rs = document.documentElement.style;
@@ -352,18 +353,15 @@ function layoutWebBoxes() {
     return r;
   };
 
-  // Title screen: a full-width band (Hairline), or a centred card shrink-wrapped to the name.
-  if (inset) {
+  // Title screen: a box in the centre, shrink-wrapped to the name.
+  {
     const hid = introEl.hidden;
     introEl.hidden = false;
     Object.assign(introEl.style, { width: 'max-content', height: 'auto' });
-    const w = Math.min(all - 2 * margin, Math.ceil((introEl.offsetWidth + gap) / cw) + 2);
+    const w = Math.min(all - 2 * (narrow ? 2 : 3), Math.ceil((introEl.offsetWidth + gap) / cw) + 2);
     introEl.hidden = hid;
     const h = Math.min(rows - 2, measure(introEl, w) + 2);
     place(introEl, Math.floor((all - w) / 2), Math.floor((rows - h) / 2), w, h);
-  } else {
-    const h = Math.min(rows - 2, measure(introEl, all) + 2);
-    place(introEl, 0, Math.floor((rows - h) / 2), all, h);
   }
 
   const bw = inset ? span : all;
@@ -384,12 +382,12 @@ function layoutWebBoxes() {
   if (inset) place(footerEl(), bc, rows - 1 - fh, bw, fh);
   else place(footerEl(), 0, rows - fh, all, fh + over);
 
-  // Phones keep more board around the card: a wider gap under the header and over the footer,
-  // and a card no taller than about four fifths of the space.
+  // Board shows all round the card: a gap under the header and over the footer, and a card
+  // no taller than about three quarters of the space (more than that is split into parts).
   const vgap = narrow ? 2 : 1;
   const top = top0 + hh + vgap;
   const room = rows - (inset ? 1 : 0) - fh - vgap - top;
-  const maxRows = narrow ? Math.max(6, Math.floor(room * 0.82)) : room;
+  const maxRows = Math.max(6, Math.floor(room * (narrow ? 0.8 : 0.76)));
   for (const p of pages) {
     if (p.el.hidden) continue;
     const key = [span, maxRows, cw, look.font, look.chrome, document.documentElement.dataset.vp].join('|');
@@ -397,7 +395,8 @@ function layoutWebBoxes() {
       p.fitKey = key;
       fitCard(p, (r) => rowsFor(p.el, span) <= r, maxRows, narrow);
     }
-    place(p.el, c0, top + Math.floor((room - p.rows(rowsFor, span)) / 2 * (narrow ? 1 : 0)), span, p.rows(rowsFor, span));
+    const h = p.rows(rowsFor, span);
+    place(p.el, c0, top + Math.floor((room - h) / 2), span, h); // centred in the space
   }
 }
 
@@ -408,7 +407,7 @@ function layoutWebBoxes() {
 function fitCard(pg, fits, maxRows, phone) {
   const inner = $('.w-fit', pg.el);
   const base = phone ? 0.9 : 1; // phones: smaller sections, more board
-  const floor = phone ? 0.84 : 0.86; // never smaller than this: split into parts instead
+  const floor = base * 0.96; // only the slightest shrink: anything more is split into parts
   const setZoom = (z) => (inner.style.zoom = String(z));
   pg.parts = [pg.units];
   pg.part = 0;
@@ -807,7 +806,7 @@ const shadows = [0, 1].map(() => {
 });
 let shadowCur = 0;
 let shadowRun = 0;
-const hasShadow = (box) => box && box !== introEl && !box.hidden;
+const hasShadow = (box) => box && !box.hidden;
 const setMask = (el, m) => {
   el.style.maskImage = m;
   el.style.webkitMaskImage = m;
