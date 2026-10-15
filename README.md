@@ -47,7 +47,7 @@ Press **D** (or open `?design`) for a panel to switch them live, or set them in 
 remembered in the browser. To settle on one for good, change `DEFAULT_LOOK` in `js/design.js`.
 
 Colours are built in OKLCH, so lightness and colourfulness stay even across each page's hue
-(About rose, Research periwinkle, Publications lavender, Contact sea green), held in a soft band
+(About apricot, Research periwinkle, Publications lavender, Contact sea green), held in a soft band
 of lightness in both themes; the title screen is cool silver and white.
 
 ## How it works

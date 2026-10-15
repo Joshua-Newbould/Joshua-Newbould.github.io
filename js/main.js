@@ -509,22 +509,23 @@ function fitCard(pg, fits, cap, room, phone) {
   }
   if (!done) pg.parts = split(cap); // (nothing fits even small: keep the last split)
   pg.part = Math.max(0, pg.parts.findIndex((p) => p.includes(keepUnit)));
-  // Each part is as tall as its own content (the wave flips the card between sizes), so a
-  // short last part doesn't leave an empty card.
-  let heights = [];
+  // One size per card: every part is as tall as the tallest, so flipping through the parts of
+  // a page never resizes it.
+  let tallest = 1;
   pg.rows = (rowsFor, span) => {
     if (pg.heightKey !== pg.fitKey) {
       const keep = pg.part;
-      heights = pg.parts.map((_, k) => {
+      tallest = 1;
+      for (let k = 0; k < pg.parts.length; k++) {
         pg.part = k;
         showPart(pg);
-        return Math.min(room, rowsFor(pg.el, span));
-      });
+        tallest = Math.max(tallest, Math.min(room, rowsFor(pg.el, span)));
+      }
       pg.part = keep;
       showPart(pg);
       pg.heightKey = pg.fitKey;
     }
-    return heights[pg.part] || 1;
+    return tallest;
   };
   pg.heightKey = null;
   showPart(pg);
@@ -1104,15 +1105,21 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
   const STEP = FLIP_STEP;
   const DUR = FLIP_DUR;
   let span = 0;
+  // Changing page, every switch passes through a colour of the new page's palette, taken from
+  // a smooth field (the background's own pattern at another moment), so neighbouring switches
+  // pass through neighbouring colours and the wave reads as soft bands of colour. Flipping
+  // between parts of one card keeps a quiet half-way blend.
+  const wave = samePage ? null : paint.frame(S.pt + 37.3, scheme()).rgb;
   retarget(
     allCells(),
     (i, to) => {
       const delay = ahead + field.tau(...cellCentre(i)) + rand() * 25;
-      // One soft step half-way between what the switch shows now and where it is going.
       const from = board.cells[i].cur;
       const a = faceColour(from);
       const b = faceColour(to);
-      const steps = a && b && a !== b ? [solid(mixHex(a, b, 0.5))] : null;
+      let steps = null;
+      if (wave) steps = [solid(rgbHex(wave[i * 3], wave[i * 3 + 1], wave[i * 3 + 2]))];
+      else if (a && b && a !== b) steps = [solid(mixHex(a, b, 0.5))];
       span = Math.max(span, delay);
       return { delay, dur: DUR, steps, stepDur: STEP, gap: board.gapColor, edgesIn: ahead, edgesOut: S.overlay.has(i) ? 170 : 0 };
     },
