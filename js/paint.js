@@ -1,9 +1,13 @@
-// The moving background. A WebGL shader renders it at a couple of samples per flap; each render is
-// averaged down to one flat colour per flap, and the board flips flaps whose colour has drifted.
+// The moving background, sampled down to one flat colour per flap; the board flips flaps whose
+// colour has drifted.
 //
-//   0  silk     broad, softly warped colour fields with a gentle sheen (the default)
+//   0  silk     paint folded into soft bands of pigment, lightly lit (the default)
 //   1  contour  calm terraces of flat colour over slowly shifting terrain
 //   2  drift    a few large, soft glows wandering and blending
+//
+// With a real GPU a WebGL shader renders it at 2×2 samples per flap. Without one (software
+// WebGL, no WebGL, or a GPU too slow to keep up) the same field is computed in JavaScript at
+// one sample per flap, which costs a few milliseconds every half second. `lite` says which.
 
 const VERT = `
 attribute vec2 a;
@@ -33,6 +37,12 @@ float noise(vec2 p) {
 const mat2 M = mat2(1.6, 1.2, -1.2, 1.6);
 float fbm(vec2 p) {
   float s = 0.0, a = 0.5;
+  for (int i = 0; i < 4; i++) { s += a * noise(p); p = M * p; a *= 0.47; }
+  return s;
+}
+// Smooth, large-scale version for the folding flow field.
+float fbm3(vec2 p) {
+  float s = 0.0, a = 0.5;
   for (int i = 0; i < 3; i++) { s += a * noise(p); p = M * p; a *= 0.45; }
   return s;
 }
@@ -51,16 +61,13 @@ vec3 ramp(float v) {
 // The field that the colour follows; h is its height, for the sheen.
 vec3 field(vec2 p, float t, out float h) {
   if (uMode == 1) {
-    // Contour: a few flat terraces over slowly shifting terrain.
     float n = fbm(p * 1.25 + vec2(t * 0.35, -t * 0.22));
     float v = n * 6.5 + 2.5 + uSeed;
     float i = floor(v);
     h = i * 0.08;
-    // Flat terraces with a narrow soft edge between them.
     return mix(pig(i), pig(i + 1.0), smoothstep(0.82, 1.0, fract(v)));
   }
   if (uMode == 2) {
-    // Drift: a few large glows wandering and blending.
     vec3 col = pig(5.0) * 0.25;
     float wsum = 0.25;
     for (int k = 0; k < 4; k++) {
@@ -74,11 +81,19 @@ vec3 field(vec2 p, float t, out float h) {
     h = 0.0;
     return col / wsum;
   }
-  // Silk: one broad, soft warp; colours blend smoothly, no hard edges.
-  vec2 q = vec2(fbm(p * 0.7 + vec2(0.0, t * 0.5)), fbm(p * 0.7 + vec2(5.2, 1.3) - vec2(t * 0.4, 0.0)));
-  float f = fbm(p * 0.75 + 1.8 * q + vec2(t * 0.15, -t * 0.12));
-  h = f;
-  return ramp(f * 5.0 + q.x * 2.6 + uSeed);
+  // Silk: paint folded by a twice-warped flow field into soft bands of pigment, with a light
+  // ridge where bands meet (between the old thick paint and plain smooth gradients).
+  p += vec2(0.12, 0.04) * t;
+  vec2 q = vec2(fbm3(p * 0.9 + vec2(0.3 * sin(t * 0.5), 0.27 * cos(t * 0.37))),
+                fbm3(p * 0.9 + vec2(5.2, 1.3) + vec2(0.3 * cos(t * 0.43), 0.33 * sin(t * 0.31))));
+  vec2 r = vec2(fbm3(p + 3.2 * q + vec2(1.7, 9.2) + 0.2 * t), fbm3(p + 3.2 * q + vec2(8.3, 2.8) - 0.17 * t));
+  float f = fbm3(p + 3.0 * r);
+  float v = 5.0 * f + 4.5 * r.x + 2.5 * q.y + uSeed;
+  float bi = floor(v), bf = fract(v);
+  vec3 c = mix(pig(bi), pig(bi + 1.0), smoothstep(0.45, 0.95, bf));
+  float ridge = smoothstep(0.0, 0.3, bf) * (1.0 - smoothstep(0.7, 1.0, bf));
+  h = 0.3 * ridge + 0.1 * length(r);
+  return c * (0.95 + 0.05 * ridge);
 }
 
 void main() {
@@ -99,9 +114,54 @@ void main() {
   gl_FragColor = vec4(min(c, vec3(1.0)), 1.0);
 }`;
 
-const SS = 2; // samples per flap along each axis
+const SS = 2; // samples per flap along each axis (GPU)
 
 const hexToVec = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+
+// ---------------------------------------------------------------------------
+// The same field in JavaScript (for machines without a usable GPU).
+
+const fract = (x) => x - Math.floor(x);
+function noise(x, y) {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const fx = x - ix;
+  const fy = y - iy;
+  const ux = fx * fx * (3 - 2 * fx);
+  const uy = fy * fy * (3 - 2 * fy);
+  // Gradient at a lattice point, as the shader's hash2.
+  const g = (px, py, dx, dy) => {
+    const gx = -1 + 2 * fract(Math.sin(px * 127.1 + py * 311.7) * 43758.5453123);
+    const gy = -1 + 2 * fract(Math.sin(px * 269.5 + py * 183.3) * 43758.5453123);
+    return gx * dx + gy * dy;
+  };
+  const n00 = g(ix, iy, fx, fy);
+  const n10 = g(ix + 1, iy, fx - 1, fy);
+  const n01 = g(ix, iy + 1, fx, fy - 1);
+  const n11 = g(ix + 1, iy + 1, fx - 1, fy - 1);
+  const a = n00 + (n10 - n00) * ux;
+  const b = n01 + (n11 - n01) * ux;
+  return a + (b - a) * uy;
+}
+function fbmN(x, y, octaves, gain) {
+  let s = 0;
+  let a = 0.5;
+  for (let i = 0; i < octaves; i++) {
+    s += a * noise(x, y);
+    // GLSL's mat2(1.6, 1.2, -1.2, 1.6) * p (column-major).
+    const nx = 1.6 * x - 1.2 * y;
+    y = 1.2 * x + 1.6 * y;
+    x = nx;
+    a *= gain;
+  }
+  return s;
+}
+const fbm = (x, y) => fbmN(x, y, 4, 0.47);
+const fbm3 = (x, y) => fbmN(x, y, 3, 0.45);
+const smooth = (e0, e1, x) => {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
 
 export class Paint {
   constructor() {
@@ -112,15 +172,20 @@ export class Paint {
     try {
       this.initGL();
     } catch (err) {
-      console.warn('WebGL paint unavailable, using fallback.', err);
+      console.warn('WebGL paint unavailable; drawing the background on the CPU.', err);
       this.gl = null;
     }
+    this.lite = !this.gl; // no usable GPU: the page lightens its load (see main.js)
   }
 
   initGL() {
-    // Refuse software-emulated WebGL: the CPU fallback is far cheaper there.
     const gl = this.canvas.getContext('webgl', { antialias: false, alpha: false, preserveDrawingBuffer: true, failIfMajorPerformanceCaveat: true });
     if (!gl) return;
+    // Software-emulated WebGL (SwiftShader, llvmpipe, Microsoft's basic renderer) is slower
+    // than the JavaScript field: treat it as no GPU.
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    const renderer = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    if (/swiftshader|llvmpipe|softpipe|software|basic render/i.test(renderer) && !/[?&]gpu\b/.test(location.search)) return;
     const sh = (type, src) => {
       const s = gl.createShader(type);
       gl.shaderSource(s, src);
@@ -141,12 +206,21 @@ export class Paint {
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     const u = (n) => gl.getUniformLocation(prog, n);
     this.u = { cell: u('uCell'), size: u('uSize'), t: u('uT'), seed: u('uSeed'), pig: u('uPig'), spec: u('uSpec'), relief: u('uRelief'), mode: u('uMode') };
-    // If the GPU drops the context, carry on with the CPU fallback.
+    // If the GPU drops the context, carry on in JavaScript.
     this.canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
-      this.gl = null;
+      this.dropGL();
     });
     this.gl = gl;
+  }
+
+  /** Give up on the GPU (lost, or too slow): from now on the field is computed in JavaScript. */
+  dropGL() {
+    this.gl = null;
+    if (!this.lite) {
+      this.lite = true;
+      this.onLite?.();
+    }
   }
 
   resize(board) {
@@ -167,7 +241,7 @@ export class Paint {
     const { cols, rows } = this;
     const rgb = new Uint8Array(cols * rows * 3);
     if (!this.gl) {
-      this.fallback(rgb, t, scheme);
+      this.cpu(rgb, t, scheme);
       return { rgb };
     }
     const gl = this.gl;
@@ -182,9 +256,9 @@ export class Paint {
     const t0 = performance.now();
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.readPixels(0, 0, this.w, this.h, gl.RGBA, gl.UNSIGNED_BYTE, this.pixels);
-    // A GPU this slow would stutter the board: switch to the CPU fallback after a few slow frames.
+    // A GPU this slow would stutter the board: switch to JavaScript after a few slow frames.
     this.slow = performance.now() - t0 > 40 ? (this.slow || 0) + 1 : 0;
-    if (this.slow > 3) this.gl = null;
+    if (this.slow > 3) this.dropGL();
     const px = this.pixels;
     const n = SS * SS;
     for (let row = 0; row < rows; row++) {
@@ -210,44 +284,79 @@ export class Paint {
     return { rgb };
   }
 
-  /** No WebGL: cheap stand-ins for each mode, blending through the same pigments. */
-  fallback(rgb, t, scheme) {
-    const pig = scheme.pigments.map((h) => hexToVec(h).map((v) => v * 255));
-    const at = (i) => pig[((i % 6) + 6) % 6];
-    const { cols, rows } = this;
-    const H = rows * this.chCss || 1;
-    const W = cols * this.cwCss;
-    // Drift: a few glows wandering (as in the shader).
-    const glows = [0, 1, 2, 3].map((k) => {
-      const a = t * (1.4 + k * 0.3) + k * 1.9 + this.seed;
-      return [Math.sin(a), Math.cos(a * 0.8 + k * 2.3) * 0.55];
-    });
-    for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) {
-        const o = (row * cols + col) * 3;
-        if (this.mode === 2) {
-          const px = ((col + 0.5) * this.cwCss - W / 2) * (0.95 / H);
-          const py = (H / 2 - (row + 0.5) * this.chCss) * (0.95 / H);
-          let wsum = 0.25;
-          const c = pig[5].map((v) => v * 0.25);
-          glows.forEach(([gx, gy], k) => {
-            const w = Math.exp(-((px - gx) ** 2 + (py - gy) ** 2) * 3.2);
-            for (let n = 0; n < 3; n++) c[n] += pig[k][n] * w;
-            wsum += w;
-          });
-          for (let n = 0; n < 3; n++) rgb[o + n] = c[n] / wsum;
-          continue;
-        }
-        const x = (col * this.cwCss) / 420;
-        const y = (row * this.chCss) / 420;
-        const v = (Math.sin(x * 1.1 + t * 1.5 + Math.sin(y * 1.3 - t)) + Math.sin(y * 0.9 - t * 1.2 + Math.sin(x * 0.7 + t * 0.6)) + 2) * 1.5 + this.seed;
+  /** The shader's field, in JavaScript, at one sample per flap. */
+  cpu(rgb, t, scheme) {
+    const pig = scheme.pigments.map(hexToVec);
+    const pg = (i) => pig[((Math.floor(i) % 6) + 6) % 6];
+    const mix3 = (a, b, f) => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+    const seed = this.seed;
+    const mode = this.mode;
+    const relief = scheme.relief ?? 0.35;
+    const spec = scheme.spec ?? 0.1;
+    const field = (x, y) => {
+      if (mode === 1) {
+        const v = fbm(x * 1.25 + t * 0.35, y * 1.25 - t * 0.22) * 6.5 + 2.5 + seed;
         const i = Math.floor(v);
-        let f = v - i;
-        // Contour: flat terraces with a narrow soft edge; silk: a smooth blend.
-        f = this.mode === 1 ? Math.max(0, (f - 0.82) / 0.18) : f;
-        const a = at(i);
-        const b = at(i + 1);
-        for (let k = 0; k < 3; k++) rgb[o + k] = a[k] + (b[k] - a[k]) * f * f * (3 - 2 * f);
+        return { c: mix3(pg(i), pg(i + 1), smooth(0.82, 1, v - i)), h: i * 0.08 };
+      }
+      if (mode === 2) {
+        const c = pig[5].map((v) => v * 0.25);
+        let wsum = 0.25;
+        for (let k = 0; k < 4; k++) {
+          const a = t * (1.4 + k * 0.3) + k * 1.9 + seed;
+          const dx = x - Math.sin(a);
+          const dy = y - Math.cos(a * 0.8 + k * 2.3) * 0.55;
+          const w = Math.exp(-(dx * dx + dy * dy) * 3.2);
+          for (let n = 0; n < 3; n++) c[n] += pig[k][n] * w;
+          wsum += w;
+        }
+        return { c: c.map((v) => v / wsum), h: 0 };
+      }
+      x += 0.12 * t;
+      y += 0.04 * t;
+      const qx = fbm3(x * 0.9 + 0.3 * Math.sin(t * 0.5), y * 0.9 + 0.27 * Math.cos(t * 0.37));
+      const qy = fbm3(x * 0.9 + 5.2 + 0.3 * Math.cos(t * 0.43), y * 0.9 + 1.3 + 0.33 * Math.sin(t * 0.31));
+      const rx = fbm3(x + 3.2 * qx + 1.7 + 0.2 * t, y + 3.2 * qy + 9.2 + 0.2 * t);
+      const ry = fbm3(x + 3.2 * qx + 8.3 - 0.17 * t, y + 3.2 * qy + 2.8 - 0.17 * t);
+      const f = fbm3(x + 3.0 * rx, y + 3.0 * ry);
+      const v = 5.0 * f + 4.5 * rx + 2.5 * qy + seed;
+      const i = Math.floor(v);
+      const bf = v - i;
+      const ridge = smooth(0, 0.3, bf) * (1 - smooth(0.7, 1, bf));
+      const c = mix3(pg(i), pg(i + 1), smooth(0.45, 0.95, bf)).map((u) => u * (0.95 + 0.05 * ridge));
+      return { c, h: 0.3 * ridge + 0.1 * Math.hypot(rx, ry) };
+    };
+    const { cols, rows } = this;
+    const lit = relief > 0 && cols * rows <= 1400;
+    const W = cols * this.cwCss;
+    const H = rows * this.chCss || 1;
+    const k = 0.95 / H;
+    const ll = Math.hypot(-0.5, 0.62, 0.72);
+    const [lx, ly, lz] = [-0.5 / ll, 0.62 / ll, 0.72 / ll];
+    const hl = Math.hypot(lx, ly, lz + 1);
+    for (let row = 0; row < rows; row++) {
+      // Same coordinates as the shader (whose y runs bottom-up).
+      const y = ((rows - row - 0.5) * this.chCss - H / 2) * k;
+      for (let col = 0; col < cols; col++) {
+        const x = ((col + 0.5) * this.cwCss - W / 2) * k;
+        const { c, h } = field(x, y);
+        let out = c;
+        // The lighting needs two more samples per flap: only where the board is small.
+        if (lit && mode !== 2) {
+          const e = 0.02;
+          let nx = ((h - field(x + e, y).h) / e) * 0.06;
+          let ny = ((h - field(x, y + e).h) / e) * 0.06;
+          const nl = Math.hypot(nx, ny, 1);
+          nx /= nl;
+          ny /= nl;
+          const nz = 1 / nl;
+          const diff = Math.max(nx * lx + ny * ly + nz * lz, 0);
+          const sp = Math.max((nx * lx + ny * ly + nz * (lz + 1)) / hl, 0) ** 30;
+          const shade = 1 + (0.72 + 0.36 * diff - 1) * relief;
+          out = c.map((v) => v * shade + spec * sp);
+        }
+        const o = (row * cols + col) * 3;
+        for (let n = 0; n < 3; n++) rgb[o + n] = Math.min(1, out[n]) * 255;
       }
     }
   }

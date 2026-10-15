@@ -305,7 +305,7 @@ export class Board {
     const pending = s.q.reduce((g, n) => n.gap || g, null);
     s.q.length = 0;
     // Edge fades tied to the flip itself: edges reach full strength on the very frame the flip
-    // starts (fading in over `edgesIn` ms before it), and start fading the frame it lands.
+    // starts (fading in over `edgesIn` ms before it), and finish fading just before it lands.
     s.eIn = edgesIn;
     s.eOut = edgesOut;
     s.eFrom = s.ca ?? 1;
@@ -325,10 +325,6 @@ export class Board {
         s.cur = done.to;
         s.anim = null;
         changed = true;
-        if (!s.q.length && s.eOut) {
-          s.caAnim = { t0: now, dur: s.eOut, from: 1, to: 0 };
-          s.eOut = 0;
-        }
         if (s.q.length) s.at = Math.max(s.at, now + s.q[0].w);
         if (done.then) {
           done.then();
@@ -352,6 +348,11 @@ export class Board {
         const n = s.q.shift();
         s.anim = { from: s.cur, to: n.f, t0: now, dur: n.d, then: n.then };
         if (n.gap) s.gap = n.gap;
+        // The last flip: its edges fade while it falls, gone just before it lands.
+        if (!s.q.length && s.eOut) {
+          s.caAnim = { t0: now + Math.max(0, n.d - s.eOut - 15), dur: s.eOut, from: null, to: 0 };
+          s.eOut = 0;
+        }
         changed = true;
       }
       const fd = s.caAnim;

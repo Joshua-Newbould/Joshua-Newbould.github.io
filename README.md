@@ -46,20 +46,30 @@ Press **D** (or open `?design`) for a panel to switch them live, or set them in 
 remembered in the browser. To settle on one for good, change `DEFAULT_LOOK` in `js/design.js`.
 
 Colours are built in OKLCH, so lightness and colourfulness stay even across each page's hue
-(About warm clay, Research slate blue, Publications dusty plum, Contact sage).
+(About rose, Research periwinkle, Publications lavender, Contact sea green), held in a soft band
+of lightness in both themes.
 
 ## How it works
 
 | File | Role |
 | --- | --- |
 | `js/board.js` | The canvas board: identical flaps, flip animation, timing and gutters |
-| `js/paint.js` | The background shader (three modes), sampled down to one colour per flap |
+| `js/paint.js` | The background (three modes): a WebGL shader, or the same field in JavaScript without a GPU |
 | `js/design.js` | Colour schemes, the design variations and the options panel |
-| `js/main.js` | Layout, section snapshots, transitions, theme switch, brush and input |
+| `js/main.js` | Layout and parts, section snapshots, transitions, theme switch, brush and input |
 | `css/style.css` | The web layer: typography, cards, header/footer variants, phone layout |
 
-Sections are laid out on the flap grid and scaled to fit, so the site never scrolls, even on
-phones. For a transition each visible section is rendered to an image (an SVG `foreignObject`
+Sections are laid out on the flap grid and never scroll. A card that doesn't fit is first
+set a little smaller; if that isn't enough it is split into numbered parts (‹ 1 / 3 ›), which
+flip like pages: use the arrows on the card, the mouse wheel over it, the Up/Down keys, or a
+quick flick on a touch screen. Switch size follows the screen, so phones get many small
+switches and plenty of board around a smaller card.
+
+Without a usable GPU (software WebGL, or frames that can't keep up) the site runs lighter: the
+background is computed in JavaScript at one sample per switch, switches are a little bigger,
+and the board redraws at a lower resolution.
+
+For a transition each visible section is rendered to an image (an SVG `foreignObject`
 with the page's own CSS and fonts), cut into one slice per flap and flipped in a wave; the
 header and footer change colour continuously with the wave front. Snapshots are prefetched
 while the page is idle, so a click starts flipping within a frame or two.

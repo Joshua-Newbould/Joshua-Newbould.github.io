@@ -36,6 +36,7 @@ const pages = $$('[data-page]').map((el, i) => ({
 }));
 const nav = $$('#site-nav a').map((a) => ({ el: a, id: a.getAttribute('href').slice(1) }));
 const themeToggle = $('#theme-toggle');
+const brushToggle = $('#brush-toggle');
 const prevBtn = $('[data-board="prev"]');
 const nextBtn = $('[data-board="next"]');
 
@@ -56,6 +57,43 @@ for (const pg of pages) {
   const fit = Object.assign(document.createElement('div'), { className: 'w-fit' });
   fit.append(...el.childNodes);
   el.append(fit);
+  // The pieces a card can be split into when it doesn't fit the screen: list items, rows of
+  // facts and paragraphs (the label and title stay on every part).
+  pg.units = [];
+  for (const child of fit.children) {
+    if (child.matches('.w-index, .w-big, h2, [data-strip]')) continue;
+    if (child.matches('ul, ol, dl, .bio')) pg.units.push(...child.children);
+    else pg.units.push(child);
+  }
+  pg.part = 0;
+  pg.parts = [pg.units];
+  const pager = document.createElement('div');
+  pager.className = 'w-pager';
+  pager.innerHTML =
+    '<button type="button" class="pg-prev" aria-label="Previous part"><svg class="arr" aria-hidden="true" viewBox="0 0 12 8"><path d="M4 1 1 4l3 3M1 4h10"/></svg></button>' +
+    '<span class="pg-num" aria-live="polite"></span>' +
+    '<button type="button" class="pg-next" aria-label="Next part"><svg class="arr" aria-hidden="true" viewBox="0 0 12 8"><path d="m8 1 3 3-3 3M11 4H1"/></svg></button>';
+  el.append(pager);
+  pg.pager = pager;
+}
+
+/** Show one part of a card (all of it when it fits in one). */
+function showPart(pg) {
+  const parts = pg.parts;
+  pg.part = Math.min(Math.max(0, pg.part), parts.length - 1);
+  const on = new Set(parts[pg.part]);
+  for (const u of pg.units) u.hidden = !on.has(u);
+  // A list with nothing showing goes too (its spacing would remain).
+  for (const box of new Set(pg.units.map((u) => u.parentElement))) {
+    if (box.classList.contains('w-fit')) continue;
+    box.hidden = ![...box.children].some((u) => !u.hidden);
+  }
+  const paged = parts.length > 1 || pg.splitting;
+  pg.el.classList.toggle('paged', paged);
+  pg.el.dataset.part = paged ? `${pg.part + 1}/${parts.length}` : '';
+  $('.pg-num', pg.pager).textContent = `${pg.part + 1} / ${parts.length}`;
+  $('.pg-prev', pg.pager).disabled = pg.part === 0;
+  $('.pg-next', pg.pager).disabled = pg.part === parts.length - 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,11 +120,15 @@ const S = {
   lastStep: -Infinity,
   size: '',
   brush: null,
+  lite: false, // no usable GPU (or too slow): bigger switches, a lighter background
+  brushOn: false, // the paint brush works only while its button is on (off on every visit)
 };
 
 const SPEED = 0.018; // background time per second: a slow drift
-const STEP_MS = 500; // how often the background is re-sampled
-const PAINT_THRESHOLD = 16; // colour distance before a background switch flips
+// How often the background is re-sampled, and how far a switch's colour may drift before it
+// flips. Without a GPU ("lite") both relax, so there is less to compute and to draw.
+const stepMs = () => (S.lite ? 900 : 500);
+const paintThreshold = () => (S.lite ? 22 : 16);
 
 const board = new Board(canvas);
 const paint = new Paint();
@@ -175,17 +217,21 @@ function resetEdges() {
 // ---------------------------------------------------------------------------
 // Board & layout
 
-/** Switch size: generous ("XL"), and larger still on very big screens. */
+/**
+ * Switch width (CSS px) from the screen's size: small screens get small switches, so a phone
+ * shows as rich a board as a desktop; big screens get bigger ones. Without a GPU they are a
+ * little bigger again, so there are fewer to draw.
+ */
 function cellTarget(w, h) {
-  const byWidth = (w < 560 ? 10.5 : w < 1100 ? 11 : w < 1800 ? 11.5 : 13) * 1.6;
-  return Math.max(byWidth, Math.sqrt((w * h) / (1.9 * 13000)) * 1.6);
+  const base = Math.min(24, Math.max(10, Math.sqrt(w * h) / 58));
+  return S.lite ? base * 1.3 : base;
 }
 
 function build(first) {
   const cssW = document.documentElement.clientWidth || window.innerWidth;
   const cssH = window.innerHeight;
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const size = `${cssW}x${cssH}@${dpr}`;
+  const dpr = Math.min(window.devicePixelRatio || 1, S.lite ? 1.5 : 2);
+  const size = `${cssW}x${cssH}@${dpr}${S.lite ? 'L' : ''}`;
   if (size === S.size) return;
   S.size = size;
   dropBrush();
@@ -279,8 +325,8 @@ function layoutWebBoxes() {
   const all = board.cols;
   const narrow = board.cssW < 640;
   const margin = narrow ? 1 : 2;
-  // Content is wide (up to ~1280px) and centred.
-  const span = Math.min(board.cols - 2 * margin * 2, Math.ceil(1280 / cw));
+  // Content is wide (up to ~1280px) and centred; on phones it leaves a wider band of board.
+  const span = Math.min(board.cols - (narrow ? 6 : 2 * margin * 2), Math.ceil(1280 / cw));
   const c0 = Math.floor((board.cols - span) / 2);
   const inset = look.chrome !== 'hairline'; // Floating & Frame: header and footer as wide as the content
   const rs = document.documentElement.style;
@@ -338,29 +384,88 @@ function layoutWebBoxes() {
   if (inset) place(footerEl(), bc, rows - 1 - fh, bw, fh);
   else place(footerEl(), 0, rows - fh, all, fh + over);
 
-  const top = top0 + hh + 1;
-  const room = rows - (inset ? 1 : 0) - fh - 1 - top;
+  // Phones keep more board around the card: a wider gap under the header and over the footer,
+  // and a card no taller than about four fifths of the space.
+  const vgap = narrow ? 2 : 1;
+  const top = top0 + hh + vgap;
+  const room = rows - (inset ? 1 : 0) - fh - vgap - top;
+  const maxRows = narrow ? Math.max(6, Math.floor(room * 0.82)) : room;
   for (const p of pages) {
     if (p.el.hidden) continue;
-    // Scale the card's contents down until they fit: pages never scroll.
-    const inner = $('.w-fit', p.el);
-    inner.style.zoom = '1';
-    p.el.classList.remove('overflowing');
-    if (rowsFor(p.el, span) > room) {
-      // Below this the text is too small to read: a card that still doesn't fit scrolls instead.
-      let lo = 0.45;
-      let hi = 1;
-      for (let k = 0; k < 7; k++) {
+    const key = [span, maxRows, cw, look.font, look.chrome, document.documentElement.dataset.vp].join('|');
+    if (p.fitKey !== key) {
+      p.fitKey = key;
+      fitCard(p, (r) => rowsFor(p.el, span) <= r, maxRows, narrow);
+    }
+    place(p.el, c0, top + Math.floor((room - p.rows(rowsFor, span)) / 2 * (narrow ? 1 : 0)), span, p.rows(rowsFor, span));
+  }
+}
+
+/**
+ * Fit a card in `maxRows` without ever scrolling: shrink its text a little if that is enough,
+ * otherwise split it into numbered parts (each as full as it can be) that flip like pages.
+ */
+function fitCard(pg, fits, maxRows, phone) {
+  const inner = $('.w-fit', pg.el);
+  const base = phone ? 0.9 : 1; // phones: smaller sections, more board
+  const floor = phone ? 0.84 : 0.86; // never smaller than this: split into parts instead
+  const setZoom = (z) => (inner.style.zoom = String(z));
+  pg.parts = [pg.units];
+  pg.part = 0;
+  showPart(pg);
+  setZoom(base);
+  let zoom = base;
+  if (!fits(maxRows)) {
+    setZoom(floor);
+    if (fits(maxRows)) {
+      let lo = floor;
+      let hi = base;
+      for (let k = 0; k < 6; k++) {
         const mid = (lo + hi) / 2;
-        inner.style.zoom = String(mid);
-        if (rowsFor(p.el, span) <= room) lo = mid;
+        setZoom(mid);
+        if (fits(maxRows)) lo = mid;
         else hi = mid;
       }
-      inner.style.zoom = String(lo);
-      if (rowsFor(p.el, span) > room) p.el.classList.add('overflowing');
+      zoom = lo;
+    } else {
+      // Parts: fill each with as many pieces as fit (a piece too tall alone gets a part to itself).
+      zoom = floor;
+      pg.splitting = true; // measured with room for the part controls
+      const parts = [[]];
+      for (const u of pg.units) {
+        const cur = parts[parts.length - 1];
+        pg.parts = [...parts.slice(0, -1), [...cur, u]];
+        pg.part = parts.length - 1;
+        showPart(pg);
+        if (cur.length && !fits(maxRows)) parts.push([u]);
+        else cur.push(u);
+      }
+      pg.parts = parts;
+      pg.splitting = false;
     }
-    place(p.el, c0, top, span, Math.min(room, rowsFor(p.el, span)));
   }
+  setZoom(zoom);
+  pg.part = 0;
+  // Every part gets the height of the tallest, so flicking through them doesn't resize the card.
+  let tallest = 1;
+  const heights = (rowsFor, span) => {
+    if (pg.heightKey !== pg.fitKey) {
+      const keep = pg.part;
+      tallest = 1;
+      for (let k = 0; k < pg.parts.length; k++) {
+        pg.part = k;
+        showPart(pg);
+        tallest = Math.max(tallest, Math.min(maxRows, rowsFor(pg.el, span)));
+      }
+      pg.part = keep;
+      showPart(pg);
+      pg.heightKey = pg.fitKey;
+    }
+    return tallest;
+  };
+  pg.rows = heights;
+  pg.heightKey = null;
+  showPart(pg);
 }
 
 // ---------------------------------------------------------------------------
@@ -415,7 +520,7 @@ function shotKey(el) {
       ? nav.find((n) => n.el.hasAttribute('aria-current'))?.id + themeToggle.getAttribute('aria-checked')
       : el === footerEl()
         ? el.textContent
-        : '';
+        : el.dataset.part || '';
   const accent = document.documentElement.style.getPropertyValue('--accent');
   return [el.id || el.tagName, extra, accent, S.dark, look.palette, look.chrome, look.font, board.dpr, r.left, r.top, r.width, r.height].join('|');
 }
@@ -445,7 +550,7 @@ function renderSnapshot(el) {
     // Freeze every element's computed sizes: inside the snapshot, viewport units would
     // otherwise resolve against the image rather than the window.
     const KEEP = ['fontSize', 'lineHeight', 'letterSpacing', 'fontWeight', 'fontFamily', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
-      'marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'rowGap', 'columnGap', 'gridTemplateColumns', 'color', 'textTransform'];
+      'marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'rowGap', 'columnGap', 'gridTemplateColumns', 'color', 'textTransform', 'textDecorationLine', 'textDecorationColor', 'textDecorationThickness', 'textUnderlineOffset'];
     const src = [el, ...el.querySelectorAll('*')];
     const dst = [clone, ...clone.querySelectorAll('*')];
     src.forEach((node, k) => {
@@ -586,6 +691,22 @@ async function prefetchShots() {
     return shot;
   };
   const jobs = [() => visibleBoxes().map((el) => snapshot(el))];
+  // The visible card's other parts, so flipping through them starts at once.
+  jobs.push(() => {
+    const pg = pages[pageIndex(S.key)];
+    if (!pg || pg.parts.length < 2) return null;
+    const keep = pg.part;
+    const shots = [];
+    for (let k = 0; k < pg.parts.length; k++) {
+      if (k === keep) continue;
+      pg.part = k;
+      showPart(pg);
+      shots.push(snapshot(pg.el));
+    }
+    pg.part = keep;
+    showPart(pg);
+    return shots;
+  });
   // The visible card (or title) in the other theme, so the theme switch starts at once too.
   jobs.push(() => {
     const root = document.documentElement;
@@ -744,21 +865,54 @@ function clearThemeVeil() {
 /** Old copies of the bars over the live ones; `hole` (an element) is left showing through. */
 function veilUp(shots, hole = null) {
   clearThemeVeil();
+  for (const c of veilCanvases(shots, hole)) themeVeil.append(c);
+}
+
+/**
+ * A transition turned round while the bars are still part-way through changing: the copy
+ * that is up stays exactly as it looks now (frozen where its wipe had got to), and a copy of
+ * the live bars as they are this moment goes underneath it. Both then wipe with the new front,
+ * so nothing on the bars jumps.
+ */
+function veilRedirect(shots, hole = null) {
+  if (!themeVeil.children.length) return veilUp(shots, hole);
+  veilRun++; // the old wipe stops where it is
+  for (const c of themeVeil.children) {
+    const m = c.style.maskImage;
+    if (m && m !== 'none') c.frozen = c.frozen ? `${c.frozen}, ${m}` : m;
+  }
+  themeVeil.prepend(...veilCanvases(shots, hole));
+}
+
+function veilCanvases(shots, hole) {
   const h = hole?.getBoundingClientRect();
+  const out = [];
   for (const shot of shots) {
     if (!shot) continue;
     const c = shot.canvas.cloneNode(false);
     const g = c.getContext('2d');
     g.drawImage(shot.canvas, 0, 0);
     if (h) {
+      // Exactly the switch's own pill, so the live switch shows through without a ring of bar.
       const d = c.width / shot.rect.width;
       g.globalCompositeOperation = 'destination-out';
       g.beginPath();
-      g.roundRect((h.left - shot.rect.left - 2) * d, (h.top - shot.rect.top - 2) * d, (h.width + 4) * d, (h.height + 4) * d, ((h.height + 4) / 2) * d);
+      g.roundRect((h.left - shot.rect.left) * d, (h.top - shot.rect.top) * d, h.width * d, h.height * d, (h.height / 2) * d);
       g.fill();
     }
     Object.assign(c.style, { left: shot.rect.left + 'px', top: shot.rect.top + 'px', width: shot.rect.width + 'px', height: shot.rect.height + 'px' });
-    themeVeil.append(c);
+    out.push(c);
+  }
+  return out;
+}
+/** A veil copy's mask: the wipe, intersected with where an earlier wipe had frozen it. */
+function setVeilMask(c, m) {
+  const all = c.frozen ? `${c.frozen}, ${m}` : m;
+  c.style.maskImage = all;
+  c.style.webkitMaskImage = all;
+  if (c.frozen) {
+    c.style.maskComposite = 'intersect';
+    c.style.webkitMaskComposite = 'source-in';
   }
 }
 function veilWipe(field, lag, span) {
@@ -768,7 +922,7 @@ function veilWipe(field, lag, span) {
   const frame = (now) => {
     if (run !== veilRun) return;
     const t = now - t0 - lag;
-    for (const c of themeVeil.children) setMask(c, field.edge(c.getBoundingClientRect(), t, 'transparent', '#000', 110));
+    for (const c of themeVeil.children) setVeilMask(c, field.edge(c.getBoundingClientRect(), t, 'transparent', '#000', 110));
     if (t > span + 300) return clearThemeVeil();
     requestAnimationFrame(frame);
   };
@@ -825,7 +979,12 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
   };
   pendingApply = apply;
   themeRippling = false;
-  clearThemeVeil();
+  // Flipping to another part of the same card leaves the header and footer alone.
+  const samePage = fromKey === toKey;
+  const barsSweep = fromKey !== 'intro' && toKey !== 'intro' && !fromNothing && !samePage;
+  // Bars that change colour in place keep any part-wiped copy (see veilRedirect); bars that
+  // join the wave as switches drop it.
+  if (!barsSweep && !samePage) clearThemeVeil();
   restoreBrushBoxes(true); // brushed sections back to normal before they join the wave
   if (reduce.matches) {
     apply();
@@ -836,7 +995,6 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
     S.overlay = new Map();
   }
   const before = new Set(S.overlay.keys());
-  const barsSweep = fromKey !== 'intro' && toKey !== 'intro' && !fromNothing;
   const oldCard = fromNothing ? null : morphBox();
   if (!fromNothing) {
     const [added, ...bars] = await Promise.all([
@@ -844,7 +1002,7 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
       ...(barsSweep ? [headerEl(), footerEl()].map((el) => snapshot(el)) : []),
     ]);
     if (token !== morphToken) return;
-    if (barsSweep) veilUp(bars); // the header and footer as they were, until the wave passes
+    if (barsSweep) veilRedirect(bars); // the header and footer as they were, until the wave passes
     if (!added) {
       apply();
       return finishWeb();
@@ -879,7 +1037,7 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
       const b = faceColour(to);
       const steps = a && b && a !== b ? [solid(mixHex(a, b, 0.5))] : null;
       span = Math.max(span, delay);
-      return { delay, dur: DUR, steps, stepDur: STEP, edgesIn: ahead, edgesOut: S.overlay.has(i) ? 170 : 0 };
+      return { delay, dur: DUR, steps, stepDur: STEP, gap: board.gapColor, edgesIn: ahead, edgesOut: S.overlay.has(i) ? 170 : 0 };
     },
     (i) => S.overlay.has(i) || before.has(i),
   );
@@ -909,11 +1067,15 @@ function finishWeb() {
 }
 
 /** Abandon a transition at once (theme switch, resize). */
-function cancelWeb() {
+function cancelWeb({ keepTheme = false } = {}) {
   morphToken++;
   clearThemeVeil();
   restoreBrushBoxes(true);
   if (pendingApply) pendingApply(); // a navigation still being prepared goes through
+  if (!keepTheme && themeWanted()) {
+    applyTheme(S.wantDark); // so does a theme switch that hadn't taken effect yet
+    syncDom();
+  }
   if (S.overlay || goingTo) finishWeb();
 }
 
@@ -926,6 +1088,12 @@ function go(key, { dir = 1, push = true, origin = null } = {}) {
   webGo(
     () => {
       S.key = key;
+      const pg = pages[pageIndex(key)];
+      if (pg?.part) {
+        pg.part = 0; // a page opens at its first part
+        showPart(pg);
+      }
+      if (themeWanted()) applyTheme(S.wantDark); // a theme switch cut short rides this wave
       syncDom();
       S.frame = paint.frame(S.pt, scheme());
       S.lastStep = performance.now();
@@ -946,6 +1114,25 @@ function keepFocus(from) {
 }
 
 const enter = (origin = null) => go('about', { origin });
+
+/** Flip the visible card to its next (+1) or previous (-1) part, in the same wave as a page. */
+function goPart(delta, origin = null) {
+  if (S.key === 'intro' || goingTo) return;
+  const pg = pages[pageIndex(S.key)];
+  const to = Math.min(pg.parts.length - 1, Math.max(0, pg.part + delta));
+  if (to === pg.part || pendingApply) return;
+  webGo(
+    () => {
+      pg.part = to;
+      showPart(pg);
+      if (themeWanted()) {
+        applyTheme(S.wantDark);
+        syncDom();
+      }
+    },
+    { dir: delta, toKey: S.key, origin },
+  );
+}
 function step(delta, origin = null) {
   if (S.key === 'intro') return;
   const n = pages.length;
@@ -958,6 +1145,24 @@ const centreOf = (el) => {
 
 // ---------------------------------------------------------------------------
 // Light ↔ dark
+
+/** A theme switch has been asked for that hasn't taken effect yet. */
+const themeWanted = () => S.wantDark != null && S.wantDark !== S.dark;
+
+/** Take on a theme (the switches follow in whatever wave is running). */
+function applyTheme(dark) {
+  const oldGap = board.gapColor;
+  S.dark = dark;
+  try {
+    localStorage.setItem('theme', S.dark ? 'dark' : 'light');
+  } catch {}
+  applyLook();
+  // Every switch keeps its old gutter until the wave reaches it.
+  for (const c of board.cells) c.gap = c.gap || oldGap;
+  board.gapColor = gutter(S.dark, look);
+  S.frame = paint.frame(S.pt, scheme());
+  S.lastStep = performance.now();
+}
 
 /** Every click counts: a click mid-ripple turns it round from wherever the switches are. */
 function toggleTheme() {
@@ -979,12 +1184,11 @@ function toggleTheme() {
 async function switchTheme(dark, preShots = null) {
   const origin = centreOf(themeToggle);
   const motion = !reduce.matches;
-  // Another theme ripple under way is redirected from where it is; anything else is cut short.
-  const rippling = themeRippling && S.overlay && !pendingApply;
-  if (rippling) {
-    morphToken++;
-    clearThemeVeil();
-  } else cancelWeb();
+  // A wave or ripple already moving is turned round from wherever its switches are; only a
+  // navigation still being prepared is cut short (it goes through at once).
+  const rippling = !!S.overlay && !pendingApply;
+  if (rippling) morphToken++;
+  else cancelWeb({ keepTheme: true });
   if (dark === S.dark && !rippling) return; // asked for and back again before anything changed
   const token = ++morphToken;
   themeRippling = true;
@@ -1000,24 +1204,14 @@ async function switchTheme(dark, preShots = null) {
     const bars = [headerEl(), footerEl()].filter((el) => !el.closest('[hidden]'));
     const barShots = await Promise.all(preShots || bars.map((el) => snapshot(el)));
     if (token !== morphToken) return;
-    veilUp(barShots, themeToggle);
+    veilRedirect(barShots, themeToggle);
     const added = await boxesToSwitches(flipBoxes(), oldShots);
     if (token !== morphToken) return;
     if (added) for (const i of added) before.add(i);
     else S.overlay = null;
   }
   if (dark === S.dark) return finishWeb();
-  const oldGap = board.gapColor;
-  S.dark = dark;
-  try {
-    localStorage.setItem('theme', S.dark ? 'dark' : 'light');
-  } catch {}
-  applyLook();
-  // Every switch keeps its old gutter until the ripple reaches it.
-  for (const c of board.cells) c.gap = c.gap || oldGap;
-  board.gapColor = gutter(S.dark, look);
-  S.frame = paint.frame(S.pt, scheme());
-  S.lastStep = performance.now();
+  applyTheme(dark);
   syncDom();
 
   const BLENDS = [0.5];
@@ -1095,7 +1289,7 @@ function paintStep(now) {
   S.lastStep = now;
   S.frame = paint.frame(S.pt, scheme());
   const rgb = S.frame.rgb;
-  const th2 = PAINT_THRESHOLD * PAINT_THRESHOLD;
+  const th2 = paintThreshold() ** 2;
   for (const c of board.cells) {
     if (!isPaint(c.abs) || board.busy(c)) continue;
     const k = c.i * 3;
@@ -1104,7 +1298,7 @@ function paintStep(now) {
     const db = rgb[k + 2] - c.b;
     if (dr * dr + dg * dg + db * db > th2) {
       rememberPaint(c);
-      board.flip(c, concrete(null, c.i), { delay: rand() * STEP_MS, dur: 440 + rand() * 240 });
+      board.flip(c, concrete(null, c.i), { delay: rand() * stepMs(), dur: 440 + rand() * 240 });
     }
   }
 }
@@ -1231,7 +1425,7 @@ function* cellsBetween(a, b) {
 }
 
 function startPainting(b) {
-  if (b.painting || S.brush !== b) return;
+  if (b.painting || S.brush !== b || b.noPaint) return;
   b.painting = true;
   clearTimeout(b.timer);
   document.documentElement.classList.add('painting');
@@ -1250,12 +1444,17 @@ function dropBrush() {
 
 function startBrush(e) {
   dropBrush();
-  if (reduce.matches) return; // the brush is all motion: off when motion is reduced
+  const b = { id: e.pointerId, x: e.clientX, y: e.clientY, last: board.cellAt(e.clientX, e.clientY), painting: false, moved: false, lastSplash: 0, t0: performance.now() };
+  // On a touch screen, a press on a card with parts may be a flick: don't paint straight away.
+  b.flick = e.pointerType !== 'mouse' && !!e.target.closest?.('section.paged');
+  // The brush paints only while its button is on (and never with reduced motion); a press
+  // still counts when it might be a flick on a card, which turns the card's part.
+  b.noPaint = !S.brushOn || reduce.matches;
+  if (b.noPaint && !b.flick) return;
   try {
     e.target.setPointerCapture(e.pointerId);
   } catch {}
-  const b = { id: e.pointerId, x: e.clientX, y: e.clientY, last: board.cellAt(e.clientX, e.clientY), painting: false, moved: false, lastSplash: 0 };
-  b.timer = setTimeout(() => startPainting(b), HOLD_MS);
+  if (!b.noPaint) b.timer = setTimeout(() => startPainting(b), b.flick ? 450 : HOLD_MS);
   S.brush = b;
 }
 
@@ -1266,6 +1465,8 @@ function brushMove(e) {
   const b = S.brush;
   if (!b || b.id !== e.pointerId) return false;
   if (!b.moved && Math.hypot(e.clientX - b.x, e.clientY - b.y) > 8) {
+    // (A possible flick waits until it's clearly a slow drag.)
+    if (b.flick && performance.now() - b.t0 < 280) return true;
     b.moved = true;
     startPainting(b);
   }
@@ -1296,7 +1497,21 @@ for (const el of [canvas, source]) {
   el.addEventListener('pointermove', (e) => {
     if (e.isPrimary && brushMove(e) && S.brush?.painting) e.preventDefault();
   });
-  for (const type of ['pointerup', 'pointercancel']) el.addEventListener(type, (e) => S.brush && S.brush.id === e.pointerId && dropBrush());
+  for (const type of ['pointerup', 'pointercancel']) {
+    el.addEventListener(type, (e) => {
+      const b = S.brush;
+      if (!b || b.id !== e.pointerId) return;
+      // A quick flick across a card with parts turns to the next or previous part.
+      const dx = e.clientX - b.x;
+      const dy = e.clientY - b.y;
+      if (type === 'pointerup' && b.flick && !b.painting && performance.now() - b.t0 < 450 && Math.max(Math.abs(dx), Math.abs(dy)) > 40) {
+        const d = Math.abs(dy) > Math.abs(dx) ? dy : dx;
+        dropBrush();
+        return goPart(d < 0 ? 1 : -1, { x: e.clientX, y: e.clientY });
+      }
+      dropBrush();
+    });
+  }
 }
 canvas.addEventListener('lostpointercapture', (e) => S.brush && S.brush.id === e.pointerId && dropBrush());
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -1317,6 +1532,12 @@ $('#enter').addEventListener('click', () => enter());
 prevBtn.addEventListener('click', () => step(-1, centreOf(prevBtn)));
 nextBtn.addEventListener('click', () => step(1, centreOf(nextBtn)));
 themeToggle.addEventListener('click', toggleTheme);
+brushToggle.addEventListener('click', () => {
+  S.brushOn = !S.brushOn;
+  brushToggle.setAttribute('aria-pressed', String(S.brushOn));
+  document.documentElement.classList.toggle('brush-on', S.brushOn);
+  if (!S.brushOn) dropBrush();
+});
 
 const options = mountOptions(look, onLookChange);
 
@@ -1335,14 +1556,47 @@ window.addEventListener('keydown', (e) => {
     enter();
     return;
   }
-  if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+  if (e.target.closest?.('a, button, input') && (e.key === ' ' || e.key === 'Enter')) return;
+  if (e.key === 'ArrowRight') {
     e.preventDefault();
     step(1);
-  } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+  } else if (e.key === 'ArrowLeft') {
     e.preventDefault();
     step(-1);
+  } else if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') {
+    // Through a card's parts (the page never scrolls).
+    e.preventDefault();
+    goPart(1);
+  } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
+    e.preventDefault();
+    goPart(-1);
   }
 });
+
+// Parts: the controls on the card, the mouse wheel over it, and a quick flick on touch screens.
+for (const pg of pages) {
+  $('.pg-prev', pg.pager).addEventListener('click', (e) => goPart(-1, centreOf(e.currentTarget)));
+  $('.pg-next', pg.pager).addEventListener('click', (e) => goPart(1, centreOf(e.currentTarget)));
+}
+let wheelAt = 0;
+let wheelSum = 0;
+let wheelFired = 0;
+source.addEventListener(
+  'wheel',
+  (e) => {
+    const card = e.target.closest?.('section.paged');
+    if (!card) return;
+    const now = performance.now();
+    if (now - wheelAt > 250) wheelSum = 0;
+    wheelAt = now;
+    wheelSum += e.deltaY + e.deltaX;
+    if (Math.abs(wheelSum) < 40 || now - wheelFired < 650) return;
+    wheelFired = now;
+    wheelSum = 0;
+    goPart(e.deltaY + e.deltaX > 0 ? 1 : -1, { x: e.clientX, y: e.clientY });
+  },
+  { passive: true },
+);
 
 let resizeTimer = 0;
 window.addEventListener('resize', () => {
@@ -1380,7 +1634,8 @@ async function onLookChange(key) {
 function loop(now) {
   if (S.lastNow) S.pt += (Math.min(now - S.lastNow, 250) / 1000) * SPEED;
   S.lastNow = now;
-  if (!reduce.matches && now - S.lastStep >= STEP_MS) paintStep(now);
+  if (!reduce.matches && now - S.lastStep >= stepMs()) paintStep(now);
+  watchFrames(now);
   const b = S.brush;
   if (b && b.painting && b.last >= 0 && now - b.lastSplash >= RESPLASH_MS) {
     splash(b.last, true);
@@ -1390,7 +1645,30 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
+/** Go lite (once) when the GPU is missing or turns out too slow: rebuild with lighter settings. */
+function goLite() {
+  if (S.lite) return;
+  S.lite = true;
+  document.documentElement.dataset.lite = '';
+  build(false);
+}
+paint.onLite = goLite;
+
+// A machine that can't hold a steady frame rate in the first seconds (while nothing else is
+// moving much) gets the lighter settings too.
+const frameLog = [];
+function watchFrames(now) {
+  if (S.lite || frameLog.done) return;
+  frameLog.push(now);
+  if (frameLog.length < 150 || document.hidden) return;
+  const d = frameLog.slice(1).map((t, k) => t - frameLog[k]).sort((a, b) => a - b);
+  frameLog.done = true;
+  if (d[(d.length / 2) | 0] > 28) goLite();
+}
+
 async function start() {
+  S.lite = paint.lite;
+  if (S.lite) document.documentElement.dataset.lite = '';
   applyLook();
   await Promise.all([
     document.fonts.load('400 13px "IBM Plex Mono"'),

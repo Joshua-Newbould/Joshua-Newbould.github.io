@@ -134,6 +134,7 @@ body {
 
 .js a {
   color: var(--accent);
+  text-decoration-line: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
@@ -229,6 +230,9 @@ body {
   gap: 2rem;
 }
 .foot-nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7em;
   white-space: nowrap;
   letter-spacing: inherit;
   text-transform: inherit;
@@ -236,6 +240,21 @@ body {
 }
 .foot-nav button:hover {
   color: var(--text);
+}
+
+/* Footer arrows: drawn, so they sit on the labels' cap height in every font and snapshot. */
+.arr {
+  width: 1.1em;
+  height: 0.75em;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.js #publications li:last-child {
+  padding-bottom: 0;
 }
 
 /* ---------- Header & footer styles ---------- */
@@ -291,6 +310,59 @@ body {
 }
 
 /* ---------- Sun / moon switch ---------- */
+
+/* The header's tools: the paint brush (off until pressed) and the sun/moon switch. */
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+#brush-toggle {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
+}
+#brush-toggle svg {
+  width: 14px;
+  height: 14px;
+}
+#brush-toggle .bt-handle {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+#brush-toggle .bt-tip {
+  fill: currentColor;
+}
+#brush-toggle:hover {
+  color: var(--text);
+}
+#brush-toggle[aria-pressed="true"] {
+  background: var(--text);
+  color: var(--surface);
+  box-shadow: none;
+}
+#brush-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  #brush-toggle {
+    transition: background 0.2s, color 0.2s;
+  }
+}
+/* While the brush is on, the board and cards show where it will paint. */
+html.brush-on #board,
+html.brush-on main section {
+  cursor: crosshair;
+}
 
 #theme-toggle {
   flex-shrink: 0;
@@ -680,7 +752,7 @@ body {
   justify-content: space-between;
   gap: 10px;
 }
-.js #site > header.stack #theme-toggle {
+.js #site > header.stack .tools {
   margin-left: auto;
 }
 .js #site > header.tight #site-nav {
@@ -707,12 +779,48 @@ body {
 .js[data-vp~="short"] main section[data-page] {
   padding: 18px 26px;
 }
-/* A card that cannot fit even scaled right down scrolls on its own (the page never does). */
-.js main section[data-page].overflowing {
-  overflow-y: auto;
-  touch-action: pan-y;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
+/* A card too tall for the screen is split into parts (see fitCard): numbered, with controls in
+   its bottom-right corner, flipped through like pages. The page itself never scrolls. */
+.w-pager {
+  display: none;
+}
+/* (Specific enough to win over the phone and short-screen paddings.) */
+.js[data-vp] main section[data-page].paged {
+  padding-bottom: 52px;
+}
+.js main section.paged .w-pager {
+  position: absolute;
+  right: 22px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.16em;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.w-pager button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--text);
+  border-radius: 999px;
+}
+.w-pager button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+.w-pager button:disabled {
+  color: var(--line);
+  cursor: default;
+}
+.w-pager button:focus-visible {
+  outline: 1px solid var(--accent);
+}
+.w-pager .pg-num {
+  min-width: 4.2em;
+  text-align: center;
 }
 
 .js[data-vp~="phone"] #site > footer {
@@ -748,6 +856,7 @@ body {
 html:not(.js) #board,
 html:not(.js) #enter,
 html:not(.js) #theme-toggle,
+html:not(.js) #brush-toggle,
 html:not(.js) .foot-nav {
   display: none;
 }
@@ -779,8 +888,9 @@ html:not(.js) h2 {
 html:not(.js) a {
   color: var(--accent);
 }
-html:not(.js) nav a {
-  margin-right: 1rem;
+html:not(.js) #site-nav {
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
 }
 html:not(.js) dt {
   color: var(--muted);

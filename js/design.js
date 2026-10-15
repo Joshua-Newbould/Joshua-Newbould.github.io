@@ -56,17 +56,18 @@ export function oklch(L, C, h) {
 // Schemes
 
 // Each page's hue identity (degrees, OKLCH).
-const PAGE_HUE = { about: 62, research: 228, publications: 320, contact: 150 };
+const PAGE_HUE = { about: 14, research: 240, publications: 305, contact: 168 };
 
 // Per palette: the hue the neutrals lean towards, and how each page's paint is built.
 const PALETTES = {
-  // Muted, per-page hue families: warm clay, slate teal, dusty plum, sage.
+  // Per-page families of clean colour (rose, blue, violet, sea green): clearly coloured, never
+  // brown or grey, and held in a narrow band of lightness so the board is soft on the eyes.
   mineral: {
     neutral: (h) => h,
     pigments(h, dark) {
-      const hues = [h - 18, h - 6, h + 4, h + 14, h - 10, h + 22];
-      const L = dark ? [0.28, 0.36, 0.44, 0.24, 0.32, 0.44] : [0.62, 0.72, 0.82, 0.9, 0.67, 0.86];
-      const C = dark ? [0.05, 0.045, 0.055, 0.035, 0.04, 0.03] : [0.055, 0.045, 0.05, 0.03, 0.05, 0.035];
+      const hues = [h - 18, h - 6, h + 6, h + 18, h - 12, h + 12];
+      const L = dark ? [0.4, 0.45, 0.5, 0.37, 0.43, 0.48] : [0.74, 0.79, 0.84, 0.87, 0.77, 0.82];
+      const C = dark ? [0.075, 0.08, 0.075, 0.06, 0.07, 0.065] : [0.085, 0.08, 0.075, 0.06, 0.085, 0.07];
       return hues.map((x, k) => oklch(L[k], C[k], x));
     },
   },
@@ -76,8 +77,9 @@ const PALETTES = {
     pigments(h, dark) {
       const n = dark ? 255 : 75;
       const L = dark ? [0.2, 0.24, 0.29, 0.34, 0.26, 0.17] : [0.78, 0.84, 0.9, 0.95, 0.86, 0.72];
-      const out = L.map((l) => oklch(l, 0.012, n));
-      out[3] = oklch(dark ? 0.34 : 0.82, dark ? 0.045 : 0.05, h);
+      const out = L.map((l) => oklch(l, 0.014, n));
+      out[3] = oklch(dark ? 0.38 : 0.8, dark ? 0.08 : 0.085, h);
+      out[1] = oklch(dark ? 0.27 : 0.86, dark ? 0.04 : 0.04, h + 20);
       return out;
     },
   },
@@ -87,7 +89,7 @@ const PALETTES = {
     pigments(h, dark) {
       const hues = [265, 290, 235, 205, h, 250];
       const L = dark ? [0.23, 0.29, 0.35, 0.31, 0.37, 0.18] : [0.8, 0.86, 0.9, 0.84, 0.83, 0.93];
-      const C = dark ? [0.075, 0.07, 0.07, 0.065, 0.075, 0.04] : [0.055, 0.05, 0.05, 0.05, 0.06, 0.02];
+      const C = dark ? [0.1, 0.1, 0.09, 0.085, 0.1, 0.05] : [0.08, 0.075, 0.07, 0.07, 0.085, 0.03];
       return hues.map((x, k) => oklch(L[k], C[k], x));
     },
   },
@@ -118,7 +120,7 @@ export function scheme(page, dark, look) {
     accent: intro ? (dark ? oklch(0.8, 0.02, hs) : oklch(0.4, 0.02, hs)) : dark ? oklch(0.8, 0.1, h) : oklch(0.5, 0.12, h),
     // A gentle relief on the paint; brighter highlights read as glare on dark backgrounds.
     spec: dark ? 0.08 : 0.14,
-    relief: 0.35,
+    relief: 0.22,
   };
   // Brush colours: the page's hues nudged round the wheel, a touch more colourful, never white.
   sc.brush = intro
