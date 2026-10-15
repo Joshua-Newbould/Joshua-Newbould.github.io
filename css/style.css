@@ -229,7 +229,23 @@ body {
   display: flex;
   gap: 2rem;
 }
+.foot-nav .lbl {
+  display: inline-block;
+  min-width: calc(12ch + 12 * 0.18em); /* the longest name: the controls beside don't shift */
+}
+.foot-nav [data-board="prev"] .lbl {
+  text-align: right;
+}
+.js #site > footer.arrows .foot-nav .lbl {
+  display: none;
+}
+.js #site > footer.arrows .foot-nav button {
+  min-width: 30px;
+  justify-content: center;
+}
 .foot-nav button {
+  padding: 10px 4px;
+  margin: -10px -4px;
   display: inline-flex;
   align-items: center;
   gap: 0.7em;
@@ -266,7 +282,7 @@ body {
 }
 .foot-tools button {
   white-space: nowrap;
-  padding: 5px 9px;
+  padding: 7px 10px;
   border-radius: 999px;
   box-shadow: inset 0 0 0 1px var(--line);
   color: var(--muted);
@@ -412,6 +428,7 @@ html.brush-on main section {
   cursor: crosshair;
 }
 
+.js .theme-switch,
 .theme-switch {
   flex-shrink: 0;
   line-height: 0;
@@ -419,7 +436,7 @@ html.brush-on main section {
 }
 .tt-track {
   position: relative;
-  display: inline-block;
+  display: block;
   width: 44px;
   height: 22px;
   border-radius: 999px;
@@ -505,7 +522,7 @@ html.brush-on main section {
   margin-right: 0.9em;
 }
 .w-big {
-  margin: 0 0 12px;
+  margin: 0 0 6px; /* the title groups with the line under it */
   font-family: var(--display);
   font-weight: var(--display-weight);
   font-size: clamp(30px, 3.6vw, 54px);
@@ -526,7 +543,7 @@ html.brush-on main section {
 }
 .js main dl {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-columns: 6rem minmax(0, 1fr); /* the same value edge on every page */
   align-items: baseline;
   gap: 7px 1.75rem;
   margin: 22px 0 0;
@@ -553,7 +570,7 @@ html.brush-on main section {
   padding: 0;
   margin: 22px 0 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr)); /* four interests: always 2 × 2 */
   gap: 26px 40px;
 }
 .js #research h3 {
@@ -582,7 +599,7 @@ html.brush-on main section {
 }
 .js #publications li {
   display: grid;
-  grid-template-columns: 5rem 1fr auto;
+  grid-template-columns: 5rem minmax(0, 1fr) 6.5rem; /* every row the same text width */
   align-items: baseline;
   gap: 2px 1.5rem;
   padding: 16px 0;
@@ -596,6 +613,7 @@ html.brush-on main section {
 .js #publications .w-status {
   grid-column: 3;
   grid-row: 1;
+  justify-self: end;
 }
 .js .pub-title,
 .js .pub-authors,
@@ -659,6 +677,32 @@ html.brush-on main section {
   margin-bottom: 9px;
 }
 
+/* A paged About stacks (facts, then biography), so its text keeps one left edge and width
+   through every part; two columns only when it all fits at once. */
+.js[data-vp~="wide"] #about.paged .w-fit {
+  display: block;
+}
+.js[data-vp~="wide"] #about.paged .w-fit > .bio {
+  margin-top: 16px;
+}
+.js[data-vp~="phone"] #research ul {
+  grid-template-columns: minmax(0, 1fr);
+}
+/* Fewer stranded last words. */
+.js .bio p,
+.js #research li p,
+.js .pub-authors,
+.js main dd {
+  text-wrap: pretty;
+}
+.js .pub-title,
+.js .pub-venue {
+  text-wrap: balance;
+}
+.js [data-strip] .kw {
+  white-space: nowrap;
+}
+
 /* ---------- Title screen ---------- */
 
 .js #intro {
@@ -680,7 +724,7 @@ html.brush-on main section {
   color: var(--text);
 }
 .js #intro p {
-  margin: 16px 0 0;
+  margin: 16px -0.32em 0 0; /* (cancels the tracking after the last letter: optically centred) */
   font: 500 12px/1 var(--mono);
   letter-spacing: 0.32em;
   text-transform: uppercase;
@@ -790,7 +834,12 @@ html.brush-on main section {
   white-space: nowrap;
 }
 .js[data-card="window"] main section.paged .w-pager {
-  bottom: 10px;
+  bottom: 9px;
+  font-size: 9.5px;
+  letter-spacing: 0.2em;
+}
+.js[data-card="window"] main section.paged .w-pager .pg-num {
+  opacity: 0.8;
 }
 /* The title box as a window: the strip across its top, the status line along its foot. */
 .js #intro {
@@ -902,7 +951,7 @@ html.brush-on main section {
 }
 #design-options button {
   font: inherit;
-  padding: 5px 9px;
+  padding: 7px 10px;
   color: var(--soft);
   background: none;
   border: 0;
@@ -923,8 +972,13 @@ html.brush-on main section {
 
 .js #site > header.compact,
 .js #site > footer.compact {
-  padding: 0 20px;
   gap: 1.25rem;
+}
+/* Header and footer share one inset: when either needs the tighter one, both take it. */
+.js #site > header.pad-tight,
+.js #site > footer.pad-tight {
+  padding-left: 16px;
+  padding-right: 16px;
 }
 .js #site > header.compact #site-nav {
   gap: 1.3rem;

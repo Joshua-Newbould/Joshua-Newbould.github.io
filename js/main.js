@@ -6,7 +6,7 @@
 
 import { Board, blank, solid, source as imageSource, slice } from './board.js';
 import { Paint } from './paint.js';
-import { loadLook, saveLook, scheme as makeScheme, gutter, bgMode, mountOptions, COMBOS, comboOf, setCombo } from './design.js';
+import { loadLook, saveLook, scheme as makeScheme, gutter, bgMode, mountOptions, COMBOS, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = (s, r = document) => r.querySelector(s);
@@ -71,6 +71,7 @@ for (const pg of pages) {
   }
   pg.part = 0;
   pg.parts = [pg.units];
+  pg.splitting = false;
   const pager = document.createElement('div');
   pager.className = 'w-pager';
   pager.innerHTML =
@@ -123,7 +124,7 @@ function showPart(pg) {
     if (box.classList.contains('w-fit')) continue;
     box.hidden = ![...box.children].some((u) => !u.hidden);
   }
-  const paged = parts.length > 1 || pg.splitting;
+  const paged = parts.length > 1 || !!pg.splitting;
   pg.el.classList.toggle('paged', paged);
   pg.el.classList.toggle('later', pg.part > 0); // parts after the first drop the repeated lines
   pg.el.dataset.part = paged ? `${pg.part + 1}/${parts.length}` : '';
@@ -231,6 +232,30 @@ const mixLab = (a, b, t) => {
   const q = hexToLab(b);
   return labToHex(p.map((v, k) => v + (q[k] - v) * t));
 };
+/**
+ * A blend that goes round the colour wheel (keeping colourfulness), the way that doesn't pass
+ * through olive; near-neutral colours (card surfaces, the silver title) blend in OKLab.
+ */
+const hexToLch = (h) => {
+  const [L, A, B] = hexToLab(h);
+  return [L, Math.hypot(A, B), ((Math.atan2(B, A) * 180) / Math.PI + 360) % 360];
+};
+const inOlive = (h) => ((h = (h + 360) % 360), h > 65 && h < 150);
+const mixLch = (a, b, t) => {
+  const [L1, C1, h1] = hexToLch(a);
+  const [L2, C2, h2] = hexToLch(b);
+  if (C1 < 0.03 || C2 < 0.03) return mixLab(a, b, t);
+  let d = ((h2 - h1 + 540) % 360) - 180;
+  const crosses = (dd) => {
+    for (let s = 0.1; s < 0.95; s += 0.1) if (inOlive(h1 + dd * s)) return true;
+    return false;
+  };
+  const alt = d > 0 ? d - 360 : d + 360;
+  if (crosses(d) && !crosses(alt)) d = alt;
+  const C = Math.max(C1 + (C2 - C1) * t, 0.85 * Math.min(C1, C2));
+  const h = ((h1 + d * t) * Math.PI) / 180;
+  return labToHex([L1 + (L2 - L1) * t, C * Math.cos(h), C * Math.sin(h)]);
+};
 
 /** What a switch shows when it isn't standing in for a section: null = background. */
 const faceAt = (i) => (S.overlay && S.overlay.get(i)) || (S.brushMap && S.brushMap.get(i)) || null;
@@ -303,6 +328,7 @@ function build(first) {
   dropBrush();
   if (!first) cancelWeb(); // a wave's switches belong to the old grid
   board.gapColor = gutter(S.dark, look, S.key);
+  shadeBoard();
   board.configure(Board.metrics(cssW, cssH, dpr, cellTarget(cssW, cssH), 1.9), solid(board.gapColor));
   paint.resize(board);
   S.frame = paint.frame(S.pt, scheme());
@@ -338,6 +364,8 @@ function setFooterLabels(id) {
   const n = pages.length;
   $('.lbl', prevBtn).textContent = pages[(k - 1 + n) % n].name;
   $('.lbl', nextBtn).textContent = pages[(k + 1) % n].name;
+  prevBtn.setAttribute('aria-label', `Previous: ${pages[(k - 1 + n) % n].name}`);
+  nextBtn.setAttribute('aria-label', `Next: ${pages[(k + 1) % n].name}`);
 }
 
 /**
@@ -357,7 +385,11 @@ function fitBar(el, width, modes) {
   el.hidden = false;
   siteEl.hidden = false;
   Object.assign(el.style, { width: `${width}px`, height: 'auto' });
-  const fits = () => [el, ...el.children].every((x) => x.scrollWidth <= x.clientWidth + 1);
+  // Nothing may overflow, nor run into the bar's own padding.
+  const fits = () => {
+    const lim = el.getBoundingClientRect().right - parseFloat(getComputedStyle(el).paddingRight) + 6; // (buttons' tap areas reach 4px past their text)
+    return [el, ...el.children].every((x) => x.scrollWidth <= x.clientWidth + 5) && [...el.querySelectorAll('button, p, a')].every((x) => x.getBoundingClientRect().right <= lim);
+  };
   for (const m of modes) {
     el.classList.remove(...all);
     el.classList.add(...m);
@@ -379,7 +411,7 @@ function layoutWebBoxes() {
     const w = board.cssW;
     const h = board.cssH;
     const short = h <= 560 && w > h;
-    document.documentElement.dataset.vp = [w < 640 && 'phone', (w >= 1000 || (w >= 560 && short)) && 'wide', short && 'short'].filter(Boolean).join(' ');
+    document.documentElement.dataset.vp = [w < 640 && 'phone', (w >= 1000 || (w >= 800 && short)) && 'wide', short && 'short'].filter(Boolean).join(' ');
   }
   const dpr = board.dpr;
   const cw = board.cw / dpr;
@@ -436,7 +468,15 @@ function layoutWebBoxes() {
   // the nav on the header's row as long as they can, since height is what they lack).
   const short = board.cssH <= 560 && board.cssW > board.cssH;
   fitBar(headerEl(), bw * cw - gap, short ? [[], ['compact'], ['compact', 'tight'], ['stack', 'tight'], ['stack', 'tight', 'abbr']] : [[], ['compact'], ['stack'], ['stack', 'tight'], ['stack', 'tight', 'abbr']]);
-  fitBar(footerEl(), bw * cw - gap, [[], ['compact'], ['nocopy'], ['nocopy', 'compact'], ['nocopy', 'compact', 'tight']]);
+  fitBar(footerEl(), bw * cw - gap, [[], ['compact'], ['nocopy'], ['nocopy', 'compact'], ['nocopy', 'compact', 'arrows'], ['nocopy', 'compact', 'arrows', 'tight']]);
+  {
+    // Header and footer share one inset.
+    const hd = headerEl();
+    const ft = footerEl();
+    const tight = ['compact', 'stack'].some((c) => hd.classList.contains(c)) || ['compact', 'nocopy'].some((c) => ft.classList.contains(c));
+    hd.classList.toggle('pad-tight', tight);
+    ft.classList.toggle('pad-tight', tight);
+  }
   const hh = measure(headerEl(), bw);
   footerEl().style.paddingBottom = ''; // measured without the overhang padding (set below)
   const fh = measure(footerEl(), bw);
@@ -454,18 +494,19 @@ function layoutWebBoxes() {
   const top = top0 + hh + vgap;
   const room = rows - (inset ? 1 : 0) - fh - vgap - top;
   const maxRows = Math.max(6, Math.floor(room * (narrow ? 0.8 : 0.76)));
+  // Every card's top sits at the same spot: where the tallest card allowed would be centred.
+  const topOff = short ? 0 : Math.max(0, Math.floor((room - maxRows) / 2));
   for (const p of pages) {
     if (p.el.hidden) continue;
     const key = [span, maxRows, cw, look.font, look.chrome, look.card, document.documentElement.dataset.vp].join('|');
     if (p.fitKey !== key) {
       p.fitKey = key;
       // Short screens may use their whole height; elsewhere a card leaves board above and below.
-      fitCard(p, (r) => rowsFor(p.el, span) <= r, short ? room : maxRows, room, narrow);
+      // Every card starts at the same top, so it has only the space below that to fill.
+      fitCard(p, (r) => rowsFor(p.el, span) <= r, short ? room : maxRows, room - topOff, narrow);
     }
     const h = p.rows(rowsFor, span);
-    // Every card's top sits at the same spot: where the tallest card allowed would be centred.
-    const cap = short ? room : maxRows;
-    place(p.el, c0, top + Math.max(0, Math.floor((room - cap) / 2)), span, h);
+    place(p.el, c0, top + Math.max(0, Math.min(topOff, room - h)), span, h); // (never into the footer)
   }
 }
 
@@ -477,7 +518,7 @@ function layoutWebBoxes() {
  */
 function fitCard(pg, fits, cap, room, phone) {
   const inner = $('.w-fit', pg.el);
-  const base = phone ? 0.84 : 1; // phones: smaller sections, more board
+  const base = phone ? 0.92 : 1; // phones: slightly smaller sections, more board
   const keepUnit = pg.parts?.[pg.part]?.[0]; // stay on what was being read
   // Greedy split at a height limit: each part as full as it can be.
   const split = (limit) => {
@@ -513,11 +554,25 @@ function fitCard(pg, fits, cap, room, phone) {
       done = true;
       break;
     }
-    const parts = split(cap);
+    let parts = split(cap);
     if (!allFit(parts)) continue;
-    // Balance: the lowest limit that still needs no more parts spreads the pieces evenly.
+    // The card ends up as tall as its tallest part (a lone tall piece may exceed the cap):
+    // split again at that height, which can only fill the parts better.
+    let H = cap;
+    for (let k = 0; k < parts.length; k++) {
+      pg.parts = parts;
+      pg.part = k;
+      showPart(pg);
+      while (H < room && !fits(H)) H++;
+    }
+    if (H > cap) {
+      const q = split(H);
+      if (q.length <= parts.length && allFit(q)) parts = q;
+    }
+    // Balance: the lowest limit that still needs no more parts spreads the pieces evenly
+    // (never lower than the height one lone piece already forces).
     let lo = 3;
-    let hi = cap;
+    let hi = H;
     let best = parts;
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
@@ -715,7 +770,7 @@ function slicesOf(shot, bgHex) {
     for (let c = 0; c < nc; c++) {
       const f = slice(src, c * board.cw, r * board.ch, bgHex);
       const k = (r * nc + c) * 4;
-      f.avg = px[k + 3] > 128 ? rgbHex(px[k], px[k + 1], px[k + 2]) : bgHex;
+      f.avg = bgHex; // blends lean on the card's surface, not its ink (no grey tiles)
       out.set((r0 + r) * board.cols + c0 + c, f);
     }
   }
@@ -1139,7 +1194,7 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
       const from = board.cells[i].cur;
       const a = faceColour(from);
       const b = faceColour(to);
-      const steps = a && b && a !== b ? [solid(mixLab(a, b, 0.62))] : null;
+      const steps = a && b && a !== b ? [solid(mixLch(a, b, 0.62))] : null;
       span = Math.max(span, delay);
       return { delay, dur: DUR, steps, stepDur: STEP, gap: board.gapColor, edgesIn: ahead, edgesOut: S.overlay.has(i) ? 170 : 0 };
     },
@@ -1262,7 +1317,15 @@ const themeWanted = () => S.wantDark != null && S.wantDark !== S.dark;
 function retintGutter() {
   const old = board.gapColor;
   board.gapColor = gutter(S.dark, look, S.key);
+  shadeBoard();
   if (old !== board.gapColor) for (const c of board.cells) c.gap = c.gap || old;
+}
+
+/** The flip's shading takes a deep tint of the page's colour (pure black muddies pastels). */
+function shadeBoard() {
+  const hue = boardHue(S.key, look);
+  board.shade = S.dark ? oklchHex(0.16, 0.05, hue) : oklchHex(0.38, 0.09, hue);
+  board.shadeK = S.dark ? 1 : 0.6;
 }
 
 /** Take on a theme (the switches follow in whatever wave is running). */
@@ -1276,6 +1339,7 @@ function applyTheme(dark) {
   // Every switch keeps its old gutter until the wave reaches it.
   for (const c of board.cells) c.gap = c.gap || oldGap;
   board.gapColor = gutter(S.dark, look, S.key);
+  shadeBoard();
   S.frame = paint.frame(S.pt, scheme());
   S.lastStep = performance.now();
 }
@@ -1383,7 +1447,7 @@ async function switchTheme(dark, preShots = null, from = liveSwitch()) {
         const from = board.cells[i].cur;
         const a = faceColour(from);
         const b = faceColour(to);
-        if (a && b && a !== b) steps = levels.map((n) => solid(mixLab(a, b, BLENDS[n])));
+        if (a && b && a !== b) steps = levels.map((n) => solid(mixLch(a, b, BLENDS[n])));
       }
       const stepDur = FLIP_STEP;
       const dur = FLIP_DUR;
@@ -1807,7 +1871,7 @@ function pulseCombo(origin) {
     return {
       delay: 40 + field.tau(...cellCentre(i)) + rand() * 25,
       dur: FLIP_DUR,
-      steps: a && b && a !== b ? [solid(mixLab(a, b, 0.62))] : null,
+      steps: a && b && a !== b ? [solid(mixLch(a, b, 0.62))] : null,
       stepDur: FLIP_STEP,
       gap: board.gapColor,
     };

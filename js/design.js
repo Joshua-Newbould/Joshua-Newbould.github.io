@@ -65,10 +65,10 @@ const PAGE_HUE = { about: 48, research: 268, publications: 335, contact: 192 };
 // each an arc round the colour wheel. A click on the board (with the pulse on) moves to the
 // next one.
 export const COMBOS = {
-  about: [{ name: 'Apricot', arc: [25, 75] }, { name: 'Sunset', arc: [345, 45] }, { name: 'Citrus', arc: [50, 100] }],
+  about: [{ name: 'Apricot', arc: [25, 75] }, { name: 'Sunset', arc: [345, 45] }, { name: 'Flare', arc: [300, 40] }],
   research: [{ name: 'Indigo', arc: [245, 290] }, { name: 'Ultramarine', arc: [215, 260] }, { name: 'Twilight', arc: [270, 320] }],
   publications: [{ name: 'Fuchsia', arc: [310, 360] }, { name: 'Rose', arc: [330, 20] }, { name: 'Orchid', arc: [285, 335] }],
-  contact: [{ name: 'Lagoon', arc: [170, 215] }, { name: 'Aurora', arc: [150, 250] }, { name: 'Jade', arc: [135, 178] }],
+  contact: [{ name: 'Lagoon', arc: [170, 215] }, { name: 'Aurora', arc: [175, 290] }, { name: 'Prism', arc: [190, 330] }],
 };
 const combo = (() => {
   try {
@@ -86,6 +86,8 @@ export function setCombo(page, k) {
 }
 const arcOf = (page) => COMBOS[page]?.[comboOf(page)]?.arc;
 const arcMid = ([a, b]) => (a + ((b - a + 360) % 360) / 2) % 360;
+/** The hue a page's board centres on (its combo's middle). */
+export const boardHue = (page, look) => (page === 'intro' || !(page in PAGE_HUE) ? 255 : look.palette === 'mineral' && arcOf(page) ? arcMid(arcOf(page)) : PAGE_HUE[page]);
 
 /** A combo's six pigments: along its arc and back (so neighbours always blend cleanly). */
 function comboPigments([a, b], dark) {
@@ -96,9 +98,14 @@ function comboPigments([a, b], dark) {
   return hues.map((h, k) => {
     // Warm hues go brown when dark: they keep a lighter, clearer tone, the more so the
     // nearer they are to yellow (an orange or gold below about L 0.7 reads as ochre).
-    if (!dark || h <= 15 || h >= 110) return oklch(L[k], C[k], h);
-    const yellow = Math.min(1, Math.max(0, (h - 35) / 45));
-    return oklch(Math.max(L[k] + 0.14, 0.62 + 0.12 * yellow), C[k] + 0.03, h);
+    if (!dark) return oklch(L[k], C[k], h);
+    // A weight rising smoothly from plum (330) to red (0) and falling from orange (70) to
+    // yellow-green (110): warm colours are lifted towards L 0.58 and nudged towards coral.
+    const sm = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+    const hu = h >= 330 ? h - 360 : h; // -30 … 330
+    const w = sm((hu + 30) / 30) * (1 - sm((hu - 70) / 40));
+    const hh = h - w * Math.min(20, Math.max(0, hu - 30));
+    return oklch(L[k] + w * (0.58 - L[k]) * 0.8, C[k] + 0.04 * w, hh);
   });
 }
 
@@ -194,8 +201,11 @@ export const gutter = (dark, look, page = 'intro') => {
     return dark ? oklch(0.13, 0.01, hs) : oklch(0.66, 0.012, hs);
   }
   if (page === 'intro' || !(page in PAGE_HUE)) return dark ? oklch(0.15, 0.01, 255) : oklch(0.76, 0.01, 255);
-  const h = look.palette === 'mineral' && arcOf(page) ? arcMid(arcOf(page)) : PAGE_HUE[page];
-  return dark ? oklch(0.15, 0.025, h) : oklch(0.72, 0.035, h);
+  const h = boardHue(page, look);
+  // Light: a clear tint of the page's colour (warm combos take their warmer end, so the lines
+  // read coral rather than khaki), a step darker than the lightest paint.
+  const hl = look.palette === 'mineral' && arcOf(page) && h > 15 && h < 110 ? arcOf(page)[0] : h;
+  return dark ? oklch(0.15, 0.025, h) : oklch(0.7, 0.075, hl);
 };
 
 /** Which shader the background uses. */

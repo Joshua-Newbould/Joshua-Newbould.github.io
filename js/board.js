@@ -74,6 +74,8 @@ export class Board {
     this.glyphCache = new Map();
     this.chromes = new Map();
     this.gapColor = '#050506';
+    this.shade = '#000'; // the flip's shading colour, and its strength
+    this.shadeK = 1;
     this.flipStyle = 'fall'; // how a switch flips: 'fall' (split-flap), 'turn' or 'roll'
   }
 
@@ -265,25 +267,25 @@ export class Board {
       const bh = fh - hy;
       this.drawPart(a.to, gm, x, 0, hy, y, hy);
       this.drawPart(a.from, gm, x, hy, bh, y + hy, bh);
-      ctx.fillStyle = '#000';
+      ctx.fillStyle = this.shade;
       if (theta < Math.PI / 2) {
         const sc = Math.cos(theta);
         const h = hy * sc;
         this.drawPart(a.from, gm, x, 0, hy, y + hy - h, h);
-        ctx.fillStyle = '#000';
-        ctx.globalAlpha = 0.5 * (1 - sc);
+        ctx.fillStyle = this.shade;
+        ctx.globalAlpha = this.shadeK * 0.5 * (1 - sc);
         ctx.fillRect(x, y + hy - h, fw, h);
-        ctx.globalAlpha = 0.3 * sc;
+        ctx.globalAlpha = this.shadeK * 0.3 * sc;
         ctx.fillRect(x, y, fw, hy - h);
       } else {
         const sc = -Math.cos(theta);
         const h = bh * sc;
-        ctx.globalAlpha = 0.28 * (1 - sc);
+        ctx.globalAlpha = this.shadeK * 0.28 * (1 - sc);
         ctx.fillRect(x, y + hy, fw, bh);
         ctx.globalAlpha = 1;
         this.drawPart(a.to, gm, x, hy, bh, y + hy, h);
-        ctx.fillStyle = '#000';
-        ctx.globalAlpha = 0.4 * (1 - sc);
+        ctx.fillStyle = this.shade;
+        ctx.globalAlpha = this.shadeK * 0.4 * (1 - sc);
         ctx.fillRect(x, y + hy, fw, h);
       }
       ctx.globalAlpha = 1;
@@ -317,8 +319,8 @@ export class Board {
       const c = Math.abs(Math.cos(Math.PI * e));
       const w = fw * c;
       this.drawFace(e < 0.5 ? a.from : a.to, gm, x + (fw - w) / 2, y, w, fh);
-      ctx.fillStyle = '#000';
-      ctx.globalAlpha = 0.3 * (1 - c);
+      ctx.fillStyle = this.shade;
+      ctx.globalAlpha = this.shadeK * 0.3 * (1 - c);
       ctx.fillRect(x + (fw - w) / 2, y, w, fh);
       ctx.globalAlpha = 1;
       return;
@@ -330,8 +332,8 @@ export class Board {
     ctx.clip();
     this.drawFace(a.from, gm, x, y + off, fw, fh);
     this.drawFace(a.to, gm, x, y + off - fh, fw, fh);
-    ctx.fillStyle = '#000';
-    ctx.globalAlpha = 0.22 * Math.sin(Math.PI * e);
+    ctx.fillStyle = this.shade;
+    ctx.globalAlpha = this.shadeK * 0.22 * Math.sin(Math.PI * e);
     ctx.fillRect(x, y + off - 1.5, fw, 3); // the seam between the two faces
     ctx.globalAlpha = 1;
     ctx.restore();
