@@ -9,7 +9,7 @@ export const DECISIONS = {
   chrome: { label: 'Header & footer', options: { hairline: 'Hairline', floating: 'Floating', frame: 'Frame' } },
   font: { label: 'Display type', options: { grotesk: 'Space Grotesk', inter: 'Inter Tight', chakra: 'Chakra Petch' } },
   motion: { label: 'Transition', options: { sweep: 'Sweep', ripple: 'Ripple', cascade: 'Cascade' } },
-  card: { label: 'Sections', options: { window: 'Window', plain: 'Plain' } },
+  card: { label: 'Sections', options: { window: 'Window', plain: 'Plain', console: 'Console' } },
   flip: { label: 'Switch flip', options: { fall: 'Fall', turn: 'Turn', roll: 'Roll' } },
 };
 

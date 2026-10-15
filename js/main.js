@@ -185,7 +185,10 @@ function applyLook() {
   const root = document.documentElement;
   root.dataset.font = look.font;
   root.dataset.chrome = look.chrome;
-  root.dataset.card = look.card;
+  // Console is the window layout with an inverted strip (data-console on top of data-card=window).
+  root.dataset.card = look.card === 'console' ? 'window' : look.card;
+  if (look.card === 'console') root.dataset.console = '';
+  else delete root.dataset.console;
   board.flipStyle = look.flip;
   root.dataset.theme = S.dark ? 'dark' : 'light';
   paint.mode = bgMode(look);
@@ -577,7 +580,8 @@ function fitCard(pg, fits, cap, room, phone) {
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
       const p = split(mid);
-      if (p.length <= parts.length && allFit(p)) {
+      // (Never leave the first part sparser than the plain split did: it also carries the title.)
+      if (p.length <= parts.length && allFit(p) && p[0].length >= Math.min(2, parts[0].length)) {
         best = p;
         hi = mid;
       } else lo = mid + 1;
@@ -666,7 +670,7 @@ function shotKey(el) {
           ? $('#intro-theme').getAttribute('aria-checked')
           : el.dataset.part || '';
   const accent = document.documentElement.style.getPropertyValue('--accent');
-  return [el.id || el.tagName, extra, accent, S.dark, look.palette, look.chrome, look.font, document.documentElement.dataset.card, board.dpr, r.left, r.top, r.width, r.height].join('|');
+  return [el.id || el.tagName, extra, accent, S.dark, look.palette, look.chrome, look.font, document.documentElement.dataset.card + ('console' in document.documentElement.dataset ? '+c' : ''), board.dpr, r.left, r.top, r.width, r.height].join('|');
 }
 function snapshot(el) {
   const key = shotKey(el);
@@ -713,7 +717,7 @@ function renderSnapshot(el) {
           ? `<div id="site" style="position:relative;inset:auto"><main>${html}</main></div>`
           : `<div id="site" style="position:relative;inset:auto">${html}</div>`;
     const root = document.documentElement;
-    const attrs = `data-font="${look.font}" data-chrome="${look.chrome}" data-theme="${root.dataset.theme}" data-vp="${root.dataset.vp || ''}" data-card="${root.dataset.card}"`;
+    const attrs = `data-font="${look.font}" data-chrome="${look.chrome}" data-theme="${root.dataset.theme}" data-vp="${root.dataset.vp || ''}" data-card="${root.dataset.card}"${'console' in root.dataset ? ' data-console=""' : ''}`;
     const vars = esc(root.style.cssText);
     const dpr = board.dpr;
     return (async () => {
@@ -1727,9 +1731,10 @@ prevBtn.addEventListener('click', () => step(-1, centreOf(prevBtn)));
 nextBtn.addEventListener('click', () => step(1, centreOf(nextBtn)));
 for (const t of themeSwitches()) t.addEventListener('click', toggleTheme);
 // (Temporary, while choosing: window or plain sections.)
-cardToggle.setAttribute('aria-pressed', String(look.card === 'window'));
+cardToggle.setAttribute('aria-pressed', String(look.card !== 'plain'));
 cardToggle.addEventListener('click', () => {
-  look.card = look.card === 'window' ? 'plain' : 'window';
+  const order = ['window', 'plain', 'console'];
+  look.card = order[(order.indexOf(look.card) + 1) % order.length];
   saveLook(look);
   options.render();
   onLookChange('card');
@@ -1840,7 +1845,7 @@ window.addEventListener('popstate', () => go(keyFromHash() || 'intro', { push: f
 /** A design option changed (from the review panel). */
 /** Window or plain sections: the visible card flips across to the other style in a wave. */
 function switchCards() {
-  cardToggle.setAttribute('aria-pressed', String(look.card === 'window'));
+  cardToggle.setAttribute('aria-pressed', String(look.card !== 'plain'));
   if (S.key === 'intro' || !board.cells.length) {
     applyLook();
     return layoutWeb();
