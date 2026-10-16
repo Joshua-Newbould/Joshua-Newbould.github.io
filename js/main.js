@@ -7,7 +7,7 @@
 import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js';
 import { Paint } from './paint.js';
 import { watchCodes } from './secrets.js';
-import { loadLook, saveLook, scheme as makeScheme, gutter, bgMode, mountOptions, COMBOS, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js';
+import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, bgMode, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = (s, r = document) => r.querySelector(s);
@@ -111,7 +111,7 @@ for (const pg of pages) {
   const status = document.createElement('div');
   status.className = 'w-statusline';
   status.setAttribute('aria-hidden', 'true');
-  status.innerHTML = `<span>SEC 00/${String(pages.length).padStart(2, '0')}</span><span>READY</span>`;
+  status.innerHTML = `<span>SEC 00/${String(pages.length).padStart(2, '0')}</span>`;
   introEl.append(status);
 }
 
@@ -587,7 +587,7 @@ function layoutWebBoxes() {
   // the nav on the header's row as long as they can, since height is what they lack).
   const short = G.cssH <= 560 && G.cssW > G.cssH;
   fitBar(headerEl(), bw * cw - gap, short ? [[], ['compact'], ['compact', 'tight'], ['stack', 'tight'], ['stack', 'tight', 'abbr']] : [[], ['compact'], ['stack'], ['stack', 'tight'], ['stack', 'tight', 'abbr']]);
-  fitBar(footerEl(), bw * cw - gap, [[], ['compact'], ['nocopy'], ['nocopy', 'compact'], ['nocopy', 'compact', 'arrows']]);
+  fitBar(footerEl(), bw * cw - gap, [[], ['compact'], ['nocopy'], ['nocopy', 'compact'], ['nocopy', 'compact', 'notool'], ['nocopy', 'compact', 'notool', 'arrows']]);
   {
     // Header and footer share one inset.
     const hd = headerEl();
@@ -1866,7 +1866,16 @@ function heldFace(s) {
   if (S.small === 'ascii') return concrete(s.abs, s.i);
   const last = s.q.length ? s.q[s.q.length - 1].f : s.anim ? s.anim.to : s.cur;
   const f = last.t === 'mosaic' ? last.base : last;
-  return f && f.t !== 'mosaic' && f.t !== 'glyph' ? f : concrete(s.abs, s.i);
+  if (!f || f.t === 'mosaic' || f.t === 'glyph') return concrete(s.abs, s.i);
+  // (Held while it is still the board's colour, give or take its drift; once a wave has moved
+  // the board on, e.g. to another page, it takes the board's colour now.)
+  if (f.t === 'blank' && isPaint(s.abs)) {
+    const k = s.i * 3;
+    const rgb = S.frame.rgb;
+    const d = Math.hypot(parseInt(f.bg.slice(1, 3), 16) - rgb[k], parseInt(f.bg.slice(3, 5), 16) - rgb[k + 1], parseInt(f.bg.slice(5, 7), 16) - rgb[k + 2]);
+    if (d > 3 * paintThreshold()) return concrete(s.abs, s.i);
+  }
+  return f;
 }
 
 /** Paint around a point (CSS px): every switch the brush covers flips through brushed faces and back. */
@@ -1916,6 +1925,7 @@ function splash(x, y, again = false) {
         s.g = parseInt(base.bg.slice(3, 5), 16);
         s.b = parseInt(base.bg.slice(5, 7), 16);
       }
+      board.hurry(s, 40); // (a drift flip under way lands at once, so the brush isn't kept waiting)
       board.flip(s, base, { delay, steps: brushPath(base, mask), stepDur: 85, dur: 190 });
     }
   }
@@ -1958,8 +1968,8 @@ function startBrush(e, flickOnly = false) {
   const b = { id: e.pointerId, x: e.clientX, y: e.clientY, last: board.cellAt(e.clientX, e.clientY), painting: false, moved: false, lastSplash: 0, t0: performance.now() };
   // On a touch screen, a press on a card with parts may be a flick: don't paint straight away.
   b.flick = e.pointerType !== 'mouse' && !!e.target.closest?.('section.paged');
-  // The brush paints only while its button is on (and never with reduced motion); a press
-  // still counts when it might be a flick on a card, which turns the card's part.
+  // The brush paints only the board (never with reduced motion); a press on a card with parts
+  // only counts as a possible flick, which turns the card's part.
   b.noPaint = flickOnly || reduce.matches;
   if (b.noPaint && !b.flick) return;
   try {
@@ -2063,7 +2073,20 @@ canvas.addEventListener('click', (e) => {
   if (pressedAt && Math.hypot(e.clientX - pressedAt[0], e.clientY - pressedAt[1]) > 8) return; // (a drag)
   pulseCombo({ x: e.clientX, y: e.clientY });
 });
-// ASCII mode has a button in the header and one on the title screen.
+// The page transition: the visitor's choice of sweep or ripple, in the footer.
+const waveToggle = $('#wave-toggle');
+const showWave = () => {
+  $('.fo-v', waveToggle).textContent = MOTIONS[look.motion];
+  waveToggle.setAttribute('aria-label', `Page transition: ${MOTIONS[look.motion]}`);
+};
+showWave();
+waveToggle.addEventListener('click', () => {
+  const order = Object.keys(MOTIONS);
+  look.motion = order[(order.indexOf(look.motion) + 1) % order.length];
+  saveLook(look);
+  showWave();
+  layoutWeb();
+});
 
 const options = mountOptions(look, onLookChange);
 
@@ -2221,7 +2244,7 @@ function settleBackground() {
 function pulseCombo(origin) {
   if (pendingApply || goingTo || S.overlay || S.sweep) return; // (not over a transition still running)
   const page = S.key;
-  const n = COMBOS[page]?.length || 1;
+  const n = combosOf(page, look).length || 1;
   const sweepFrom = scheme();
   const gapFrom = board.gapColor;
   const fromFrame = S.frame;

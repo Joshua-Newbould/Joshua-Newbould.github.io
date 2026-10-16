@@ -35,17 +35,13 @@ Settled: a hairline header and footer with a numbered nav, Inter Tight titles, c
 sections (an inverted title strip and a `>_` status line, on the title screen too) and a crisp
 split-flap fall.
 
-Still open, each with a default and two alternatives in `js/design.js`:
+Palettes (in `js/design.js`, as data): **Jewel** (the default: deep gemstone tones, a family per
+page), **Signal** (one strong poster colour per page), **Spectra** (luminous hue sweeps) and the
+original soft **Mineral**. Each page has three colour combos. Press **D** (or open `?design`) to
+switch palettes live, or set one in the URL, e.g. `?palette=signal`; the choice is remembered in
+the browser. To review a palette in the making, see `tools/palette/render.mjs`.
 
-| Decision | Options (default first) |
-| --- | --- |
-| Palette | Mineral · Graphite · Nebula |
-| Background | Silk · Contour · Drift |
-| Transition | Sweep · Ripple · Cascade |
-
-Press **D** (or open `?design`) for a panel to switch them live, or set them in the URL, e.g.
-`?palette=graphite&bg=contour&motion=ripple`. The choice is remembered in the browser. To settle
-on one for good, change `DEFAULT_LOOK` in `js/design.js`.
+The page transition (sweep or ripple) is the visitor's choice, in the footer.
 
 With the Mineral palette each page also has three colour combos (`COMBOS`): a click on the
 background ripples into the next one. Holding or dragging on the background paints it with a
