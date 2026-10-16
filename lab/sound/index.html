@@ -5,6 +5,7 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Flap sounds</title>
+<link rel="icon" href="data:,">
 <style>
   :root { --bg: #0b0b0c; --flap: #1b1b1e; --flap2: #232327; --ink: #ecebe6; --dim: #8a8a86; --acc: #f2b632; --gap: #050506; }
   * { box-sizing: border-box; }
@@ -14,6 +15,8 @@
   p { color: var(--dim); margin: 0 0 20px; }
   h2 { font-size: 12px; letter-spacing: .18em; text-transform: uppercase; color: var(--dim); margin: 28px 0 10px; font-weight: 500; }
   .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; }
+  #variants { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+  #variants button { min-height: 88px; font-size: 16px; }
   button {
     position: relative; min-height: 64px; padding: 10px 12px; border: 0; border-radius: 4px; cursor: pointer;
     background: linear-gradient(var(--flap2) 0 calc(50% - 1px), var(--gap) calc(50% - 1px) calc(50% + 1px), var(--flap) calc(50% + 1px) 100%); color: var(--ink);
@@ -34,22 +37,22 @@
 <body>
 <main>
   <h1>Flap sounds</h1>
-  <p>The first press starts the audio. Use headphones or speakers; phone speakers lose the low knock.</p>
+  <p>The first press starts the audio. All three share one quick tick with a warm body and a short metallic ring, tuned to a real board's sound but a little softer; they differ mostly in how a busy board sounds, so try a page wave and the drift on each.</p>
 
   <h2>Sound</h2>
   <div class="row" id="variants">
-    <button data-v="solari" aria-pressed="true">A · Solari<small>large airport board</small></button>
-    <button data-v="desk" aria-pressed="false">B · Desk<small>small, crisp unit</small></button>
-    <button data-v="soft" aria-pressed="false">C · Soft<small>for leaving on</small></button>
+    <button data-v="metal" data-name="Metal" aria-pressed="true">A · Metal<small>the tick with its ring; a page turning is an even rain-and-sand wash</small></button>
+    <button data-v="rain" data-name="Rain" aria-pressed="false">B · Rain<small>a touch more ring, a little lower; the wash in larger drops</small></button>
+    <button data-v="sand" data-name="Sand" aria-pressed="false">C · Sand<small>less ring, a little darker; the wash finer, shorter and denser</small></button>
   </div>
 
   <h2>Play</h2>
   <div class="row">
     <button data-play="single">Single flap<small>one landing</small></button>
     <button data-play="character">One character<small>drum turns 3–6 flaps</small></button>
-    <button data-play="page">Page wave<small>~2,000 flaps, 1.3 s, with drift</small></button>
-    <button data-play="ascii">ASCII wave<small>~8,000 flaps</small></button>
-    <button data-play="drift">Drift only<small>a few a frame, 5 s</small></button>
+    <button data-play="page">Page wave<small>~2,300 flaps, 1.3 s, with drift</small></button>
+    <button data-play="ascii">ASCII wave<small>~8,600 flaps, with drift</small></button>
+    <button data-play="drift">Background drift<small>~120 a second, 5 s</small></button>
     <button data-play="stop">Stop<small>drop what’s queued</small></button>
   </div>
 
@@ -63,7 +66,7 @@
 import { FlapSound } from './sound.js';
 import { wave, drift, character, single, total } from './sim.js';
 
-const sound = new FlapSound({ variant: 'solari' });
+const sound = new FlapSound({ variant: 'metal' });
 const status = document.getElementById('status');
 const meter = document.querySelector('#meter i');
 let frames = [], fi = 0, played = 0;
@@ -87,7 +90,7 @@ document.getElementById('variants').addEventListener('click', async (e) => {
   for (const x of e.currentTarget.children) x.setAttribute('aria-pressed', x === b);
   sound.setVariant(b.dataset.v);
   await ensure();
-  status.textContent = `Sound: ${b.textContent.split('·')[1].trim().split(/\s/)[0]}`;
+  status.textContent = `Sound: ${b.dataset.name}`;
 });
 
 const makers = {
