@@ -44,7 +44,9 @@ const DENSITY = {
   knee: 1e9, exp: 0.45, cmax: 70, ref: 10, fall: 0.25, cluster: 0, clusterMs: [2, 7], clusterDb: [-8, -3],
   spread: 8, skew: 1.6, makeup: 2.5, rateJit: 0.035, maxVoices: 160, perFrame: 24, landDb: 2,
 };
-const CHAIN = { pan: 0.35, hpF: 180, masterLp: 15000, shelfF: 6000, shelfDb: 0, glueThr: -18, glueRatio: 2, level: 0 };
+// `speed`: every tick is played this much slower than it was recorded or made (longer, and a
+// little lower), as a heavier, slower flap would sound.
+const CHAIN = { pan: 0.35, hpF: 180, masterLp: 15000, shelfF: 6000, shelfDb: 0, glueThr: -18, glueRatio: 2, level: 0, speed: 0.85 };
 
 /**
  * The 'metal' tick (an aluminium leaf striking its stop, on a plastic frame). Times in ms,
@@ -515,7 +517,7 @@ export class FlapSound {
       if (set[k] === this.last) k = (k + 1) % set.length;
       const s = this.ctx.createBufferSource();
       s.buffer = this.last = set[k];
-      const r = (s.playbackRate.value = 1 + (Math.random() * 2 - 1) * p.rateJit);
+      const r = (s.playbackRate.value = p.speed * (1 + (Math.random() * 2 - 1) * p.rateJit));
       const gn = this.ctx.createGain();
       // A cluster: this module stepped just after the last one, a little quieter.
       const near = prev >= 0 && Math.random() < p.cluster * busy;
