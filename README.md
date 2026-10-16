@@ -32,33 +32,32 @@ JavaScript read it directly.
 ## Design
 
 Settled: a hairline header and footer with a numbered nav, Inter Tight titles, console-style
-sections (an inverted title strip and a `>_` status line, on the title screen too) and a crisp
-split-flap fall.
+sections (an inverted title strip and a `>_` status line, on the title screen too), a silky
+moving background and a crisp split-flap fall.
 
 Palettes (in `js/design.js`, as data): **Jewel** (the default: deep gemstone tones, a family per
 page), **Signal** (one strong poster colour per page), **Spectra** (luminous hue sweeps) and the
-original soft **Mineral**. Each page has three colour combos. Press **D** (or open `?design`) to
+original soft **Mineral**. Each page has three colour combos. Press **Shift+D** (or open `?design`) to
 switch palettes live, or set one in the URL, e.g. `?palette=signal`; the choice is remembered in
 the browser. To review a palette in the making, see `tools/palette/render.mjs`.
 
 The page transition (sweep or ripple) is the visitor's choice, in the footer.
 
-With the Mineral palette each page also has three colour combos (`COMBOS`): a click on the
-background ripples into the next one. Holding or dragging on the background paints it with a
+A click on the background ripples into the page's next colour combo. Holding or dragging on the background paints it with a
 character brush instead (the sections, bars and title window sit on top and aren't painted).
 
 The header (and the title window) has an ASCII mode (`>_`), which turns the background into
 coloured characters on finer switches.
 
-Colours are built in OKLCH, so lightness and colourfulness stay even across each page's hue
-(by default About apricot, Research indigo, Publications fuchsia, Contact lagoon), held in a soft band
-of lightness in both themes; the title screen is cool silver and white.
+Colours are built in OKLCH, so lightness and colourfulness stay even across each page's hues,
+in a set band of lightness for each theme; every page has its own hue family, and the title
+screen is cool silver and white.
 
 ## How it works
 
 | File | Role |
 | --- | --- |
-| `js/board.js` | The canvas board: identical flaps, flip animation, timing and gutters |
+| `js/board.js` | The canvas board: identical flaps, flip animation, timing, gutters, batched drawing (`hold`/`release`) |
 | `js/paint.js` | The background (three modes): a WebGL shader, or the same field in JavaScript without a GPU |
 | `js/design.js` | Colour schemes, the design variations and the options panel |
 | `js/main.js` | Layout and parts, section snapshots, transitions, theme switch, brush and input |
@@ -81,7 +80,7 @@ while the page is idle, so a click starts flipping within a frame or two.
 
 Use the header nav, the footer ‹ › buttons or the arrow keys to move between pages. Any
 click or key on the title screen enters (clicking the name in the header returns to it).
-Turn on the brush button in the header, then press and hold (or drag) anywhere to paint flaps; they drift back on their own. The sun/moon
+Press and hold (or drag) on the background to paint flaps; they drift back on their own. The sun/moon
 switch ripples between light and dark. Reduced-motion preferences are respected.
 
 ## Credits

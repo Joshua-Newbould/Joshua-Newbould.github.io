@@ -338,7 +338,7 @@ export class Paint {
     const k = 0.95 / H;
     // The pattern is smooth and large: on a big board, compute every second switch each way and
     // fill in between (a quarter of the work).
-    const step = cols * rows > 500 ? 2 : 1;
+    const step = cols * rows > 500 ? 2 : 1; // (not coarser: ASCII mode turns the interpolation lattice into a visible pattern)
     const on = (n, last) => n % step === 0 || n === last;
     for (let row = 0; row < rows; row++) {
       if (!on(row, rows - 1)) continue;

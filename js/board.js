@@ -85,11 +85,35 @@ export class Board {
     this.shade = '#000'; // the flip's shading colour, and its strength
     this.shadeK = 1;
     this.shades = new Map(); // gutter colour -> the shading that goes with it
+    this.flap = 'crisp'; // how a flap falls (see turn); 'clack' and 'snap' are kept to compare
   }
 
-  /** How much longer than asked every flip takes (the crisp fall is unhurried). */
+  /** How much longer than asked every flip takes. (A smaller flap falls faster, as a pendulum
+   *  does: `sizeScale` is the square root of its height against a normal switch's.) */
   get durScale() {
-    return 1.2;
+    return (this.flap === 'snap' ? 1 : 1.2) * (this.sizeScale || 1);
+  }
+
+  /**
+   * How far the top flap has turned over its hinge at progress p (0 … 1; 1 = flat down).
+   *   clack  a real flap: it tips slowly, falls faster and faster, strikes, and bounces twice,
+   *          smaller each time, before it lies still
+   *   snap   the same, quicker, with one small bounce
+   *   crisp  a firm drop that eases into its landing
+   */
+  turn(p) {
+    if (this.flap === 'crisp') {
+      const q = p ** 1.3;
+      return q * q * (3 - 2 * q);
+    }
+    const snap = this.flap === 'snap';
+    const land = snap ? 0.74 : 0.78; // (the moment it strikes)
+    if (p < land) {
+      const u = p / land;
+      return snap ? 0.1 * u + 0.9 * u ** 2.6 : 0.2 * u + 0.8 * u ** 2.2;
+    }
+    const v = (p - land) / (1 - land);
+    return snap ? 1 - 0.045 * Math.sin(Math.PI * v) * (1 - v) : 1 - 0.075 * Math.abs(Math.sin(2 * Math.PI * v)) * (1 - v) ** 1.6;
   }
 
   /** Change the colour of the gutters between flaps at once (on start-up).
@@ -141,6 +165,8 @@ export class Board {
     this.canvas.style.width = cssW + 'px';
     this.canvas.style.height = cssH + 'px';
     this.glyphCache.clear();
+    this.atlas = null;
+    this.atlases = [];
     this.chromes.clear();
     this.active.clear();
     this.gm = this.geom(cw, ch);
@@ -197,12 +223,43 @@ export class Board {
     return c;
   }
 
+  /**
+   * A face's picture (a character, a title's corner, the brush's little flaps) as a slot in the
+   * glyph atlas, { c: canvas, x, y }, fw × fh. All the pictures share a few large canvases, so
+   * thousands of flaps drawing them are a few textures for the GPU, not thousands.
+   */
+  glyph(f, gm) {
+    let g = this.glyphCache.get(f.gk);
+    if (g) return g;
+    const { fw, fh } = gm;
+    const A = 2048;
+    const sw = fw + 2; // (a pixel round each, so a scaled half never picks up its neighbour)
+    const sh = fh + 2;
+    const cols = Math.max(1, Math.floor(A / sw));
+    if (!this.atlas || this.atlasN >= cols * Math.max(1, Math.floor(A / sh))) {
+      if (this.atlases.length >= 6) {
+        // (The brush makes many pictures: now and then start afresh.)
+        this.glyphCache.clear();
+        this.atlases = [];
+      }
+      this.atlas = document.createElement('canvas');
+      this.atlas.width = A;
+      this.atlas.height = A;
+      this.atlases.push(this.atlas);
+      this.atlasN = 0;
+    }
+    const x = (this.atlasN % cols) * sw + 1;
+    const y = Math.floor(this.atlasN / cols) * sh + 1;
+    this.atlasN++;
+    this.atlas.getContext('2d').drawImage(this.glyphCanvas(f, gm), x, y);
+    g = { c: this.atlas, x, y };
+    this.glyphCache.set(f.gk, g);
+    return g;
+  }
+
+  /** Draw a face's picture once (see glyph). */
   glyphCanvas(f, gm) {
-    const id = f.gk;
-    let c = this.glyphCache.get(id);
-    if (c) return c;
-    if (this.glyphCache.size > 4000) this.glyphCache.clear(); // (the brush's pictures are many: start afresh now and then)
-    c = document.createElement('canvas');
+    const c = document.createElement('canvas');
     c.width = gm.fw;
     c.height = gm.fh;
     const x = c.getContext('2d');
@@ -235,7 +292,6 @@ export class Board {
           x.fillRect(x0, y0 + Math.round(h / 2), w, 1); // (the hinge)
         }
       }
-      this.glyphCache.set(id, c);
       return c;
     }
     if (f.t === 'tri') {
@@ -245,7 +301,6 @@ export class Board {
       x.beginPath();
       corners.forEach(([px, py], k) => (k ? x.lineTo(px, py) : x.moveTo(px, py)));
       x.fill();
-      this.glyphCache.set(id, c);
       return c;
     }
     x.font = `${f.w} ${gm.fontPx}px ${MONO}`;
@@ -254,7 +309,6 @@ export class Board {
     x.textBaseline = 'alphabetic';
     // Centre capitals on the hinge, as on a real split-flap.
     x.fillText(f.ch, gm.fw / 2, gm.hy + Math.round(gm.fontPx * 0.35));
-    this.glyphCache.set(id, c);
     return c;
   }
 
@@ -284,7 +338,10 @@ export class Board {
       ctx.fillStyle = u.bg;
       ctx.fillRect(dx, dy, tw, dh);
     }
-    if (f.t === 'mosaic' && f.tiles[k]) ctx.drawImage(this.glyphCanvas(f, this.gm), tx, ty + py, tw, ph, dx, dy, tw, dh);
+    if (f.t === 'mosaic' && f.tiles[k]) {
+      const g = this.glyph(f, this.gm);
+      ctx.drawImage(g.c, g.x + tx, g.y + ty + py, tw, ph, dx, dy, tw, dh);
+    }
   }
 
   /** On a bare flap, the gutter strip past the flap's right and bottom edges, beside brushed pieces. */
@@ -326,8 +383,7 @@ export class Board {
     ctx.fillRect(x, y, w, h);
     if (u.t === 'slice' && w && h) ctx.drawImage(u.src.canvas, u.sx, u.sy, w, h, x, y, w, h);
     const p = Math.min(1, Math.max(0, (now - a.t0) / a.dur));
-    const q = p ** 1.3;
-    const theta = Math.PI * q * q * (3 - 2 * q);
+    const theta = Math.PI * this.turn(p);
     const sh = this.shades.get(s.gap || this.gapColor) || { shade: this.shade, k: this.shadeK };
     const k = sh.k * 1.15;
     const m = a.to.t === 'mosaic' ? a.to : a.from;
@@ -392,17 +448,25 @@ export class Board {
     const ctx = this.ctx;
     if (f.t === 'mosaic' && f.base) {
       this.drawPart(f.base, gm, x, py, ph, dy, dh);
-      ctx.drawImage(this.glyphCanvas(f, gm), 0, py, gm.fw, ph, x, dy, gm.fw, dh);
+      const g = this.glyph(f, gm);
+      ctx.drawImage(g.c, g.x, g.y + py, gm.fw, ph, x, dy, gm.fw, dh);
       return;
     }
     ctx.fillStyle = f.bg;
     ctx.fillRect(x, dy, gm.fw, dh);
-    if (f.t === 'glyph' || f.t === 'tri' || f.t === 'mosaic') ctx.drawImage(this.glyphCanvas(f, gm), 0, py, gm.fw, ph, x, dy, gm.fw, dh);
+    if (f.t === 'glyph' || f.t === 'tri' || f.t === 'mosaic') {
+      const g = this.glyph(f, gm);
+      ctx.drawImage(g.c, g.x, g.y + py, gm.fw, ph, x, dy, gm.fw, dh);
+    }
     else if (f.t === 'slice') ctx.drawImage(f.src.canvas, f.sx, f.sy + py, gm.fw, ph, x, dy, gm.fw, dh);
   }
 
   /** Draw a cell: static, or mid-flip. */
   draw(s, now) {
+    if (this.held) {
+      this.dirty.add(s);
+      return;
+    }
     const gm = this.gm;
     const { fh, fw, hy } = gm;
     const { x, y } = s;
@@ -431,9 +495,13 @@ export class Board {
       ctx.fillStyle = f.bg || this.gapColor;
       ctx.fillRect(x, y, w, h);
       if (f.t === 'slice') ctx.drawImage(f.src.canvas, f.sx, f.sy, w, h, x, y, w, h);
-      else if (f.t === 'glyph' || f.t === 'tri' || f.t === 'mosaic') ctx.drawImage(this.glyphCanvas(f, gm), x, y);
+      else if (f.t === 'glyph' || f.t === 'tri' || f.t === 'mosaic') {
+        const g = this.glyph(f, gm);
+        ctx.drawImage(g.c, g.x, g.y, gm.fw, gm.fh, x, y, gm.fw, gm.fh);
+      }
       if (over) {
-        ctx.drawImage(this.glyphCanvas(over, gm), x, y);
+        const g = this.glyph(over, gm);
+        ctx.drawImage(g.c, g.x, g.y, gm.fw, gm.fh, x, y, gm.fw, gm.fh);
         this.brushGutters(over, x, y);
       }
       if (ca > 0) {
@@ -459,12 +527,13 @@ export class Board {
         }
       }
       const p = Math.min(1, Math.max(0, (now - a.t0) / a.dur));
-      // How far the top flap has turned over its hinge (0 … π): the crisp fall, a firm drop that
-      // eases into its landing, with the hinge and the flap's edge drawn.
-      const lines = this.cw >= 12; // (the hinge and edge lines: invisible on tiny flaps)
-      const q = p ** 1.3;
-      const turn = q * q * (3 - 2 * q);
-      const theta = Math.PI * turn;
+      // How far the top flap has turned over its hinge (0 … π), with the hinge and the flap's
+      // edge drawn.
+      // (On a board of many small switches the fine touches can't be seen, and cost the most.)
+      const fine = this.cells.length > 4000;
+      const lines = this.cw >= 12 && !fine; // (the hinge and edge lines: invisible on tiny flaps)
+      const theta = Math.PI * this.turn(p);
+      const cast = !fine; // (the falling flap's shadow on the half below it)
       const sh = this.shades.get(s.gap || this.gapColor) || { shade: this.shade, k: this.shadeK };
       const shade = sh.shade;
       const k = sh.k * 1.15;
@@ -481,6 +550,17 @@ export class Board {
         ctx.fillRect(x, y + hy - h, fw, h);
         ctx.globalAlpha = k * 0.3 * sc;
         ctx.fillRect(x, y, fw, hy - h);
+        if (cast) {
+          // The flap leaning out over the lower half shades it, the more the further it leans.
+          ctx.globalAlpha = k * 0.22 * (1 - sc);
+          ctx.fillRect(x, y + hy, fw, bh);
+          // As its face tips towards the light, it catches it: a soft gleam, gone by the time
+          // it is edge-on.
+          ctx.fillStyle = '#fff';
+          ctx.globalAlpha = 0.09 * Math.sin(2 * theta);
+          ctx.fillRect(x, y + hy - h, fw, h);
+          ctx.fillStyle = shade;
+        }
         if (lines) this.edge(x, y + hy - h, fw, 1 - sc, shade);
       } else {
         const sc = -Math.cos(theta);
@@ -517,7 +597,40 @@ export class Board {
     ctx.fillStyle = shade;
   }
 
+  /** Every switch back in the board's gutter: only those whose gutter colour changes are redrawn
+   *  (one flipping takes it on its next frame). */
+  settleGaps() {
+    const now = performance.now();
+    for (const c of this.cells) {
+      const stale = c.gap && c.gap !== this.gapColor;
+      c.gap = null;
+      if (stale && !c.anim) this.draw(c, now);
+    }
+  }
+
+  /** Hold all drawing while many switches are set up at once; on release, each switch that asked
+   *  to be drawn meanwhile is drawn just once (the whole board only if a redraw was asked for). */
+  hold() {
+    if (!this.held) {
+      this.dirty = new Set();
+      this.dirtyAll = false;
+    }
+    this.held = (this.held || 0) + 1;
+  }
+  release() {
+    if (--this.held > 0) return;
+    this.held = 0;
+    if (this.dirtyAll) return this.redrawAll();
+    const now = performance.now();
+    for (const s of this.dirty) this.draw(s, now);
+    this.dirty.clear();
+  }
+
   redrawAll() {
+    if (this.held) {
+      this.dirtyAll = true;
+      return;
+    }
     this.ctx.fillStyle = this.gapColor;
     this.ctx.fillRect(0, 0, this.W, this.H);
     const now = performance.now();
@@ -584,7 +697,7 @@ export class Board {
     // With very many flaps moving at once (a wave across a board of small switches), each flap
     // still turning is redrawn every other frame, alternate halves of the board in turn; one
     // starting or landing is always drawn at once.
-    const every = this.active.size > 1500 ? 2 : 1;
+    const every = this.active.size > 3000 ? 3 : this.active.size > 1500 ? 2 : 1;
     this.tickNo = (this.tickNo || 0) + 1;
     for (const s of this.active) {
       let changed = false;

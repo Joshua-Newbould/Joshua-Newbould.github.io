@@ -185,6 +185,11 @@ const stepMs = () => (S.lite ? 900 : 500);
 const paintThreshold = () => (S.lite ? 22 : 16);
 
 const board = new Board(canvas);
+// (While comparing: ?flap=clack (the default), snap or crisp.)
+{
+  const f = new URLSearchParams(location.search).get('flap');
+  if (['clack', 'snap', 'crisp'].includes(f)) board.flap = f;
+}
 const paint = new Paint();
 const scheme = (key = S.key) => makeScheme(key, S.dark, look);
 const pageIndex = (id) => pages.findIndex((p) => p.id === id);
@@ -411,23 +416,33 @@ function build(first) {
   const dpr = Math.min(window.devicePixelRatio || 1, S.lite ? 1.5 : 2);
   const size = `${cssW}x${cssH}@${dpr}${S.lite ? 'L' : ''}${S.small || ''}`;
   if (size === S.size) return;
+  // (Only the switches changed, not the window: the sections' snapshots still hold, but not how
+  // they were cut into switches.)
+  const sameWindow = S.size && S.size.replace(/[a-z]*$/, '') === size.replace(/[a-z]*$/, '');
   S.size = size;
-  dropBrush();
-  if (!first) cancelWeb(); // a wave's switches belong to the old grid
-  board.gapColor = boardGutter();
-  shadeBoard();
-  // The page is always laid out on the normal grid. ASCII mode splits each of its switches in
-  // two each way (so cards and bars stay exactly where they are); Bad Apple's are smaller still.
-  const normal = Board.metrics(cssW, cssH, dpr, cellTarget(cssW, cssH), 1.9);
-  S.layoutGeom = { ...normal, gap: Math.max(1, Math.round(dpr)) };
-  const m = S.small === 'ascii' ? Board.subdivide(normal, 2) : S.small === 'apple' ? Board.metrics(cssW, cssH, dpr, Math.max(4, cellTarget(cssW, cssH) * (S.lite ? 0.55 : 0.4)), 1.9) : normal;
-  board.configure(m, solid(board.gapColor));
-  paint.resize(board);
-  S.frame = paint.frame(S.pt, scheme());
-  S.lastStep = performance.now();
-  retarget(allCells(), null);
+  board.hold(); // (every switch is set up first, then drawn once)
+  try {
+    dropBrush();
+    if (!first) cancelWeb(); // a wave's switches belong to the old grid
+    board.gapColor = boardGutter();
+    shadeBoard();
+    // The page is always laid out on the normal grid. ASCII mode splits each of its switches in
+    // two each way (so cards and bars stay exactly where they are); Bad Apple's are smaller still.
+    const normal = Board.metrics(cssW, cssH, dpr, cellTarget(cssW, cssH), 1.9);
+    S.layoutGeom = { ...normal, gap: Math.max(1, Math.round(dpr)) };
+    const m = S.small === 'ascii' ? Board.subdivide(normal, 2) : S.small === 'apple' ? Board.metrics(cssW, cssH, dpr, Math.max(4, cellTarget(cssW, cssH) * (S.lite ? 0.55 : 0.4)), 1.9) : normal;
+    board.configure(m, solid(board.gapColor));
+    board.sizeScale = Math.sqrt(m.ch / normal.ch);
+    paint.resize(board);
+    S.frame = paint.frame(S.pt, scheme());
+    S.lastStep = performance.now();
+    retarget(allCells(), null);
+  } finally {
+    board.release();
+  }
   layoutWeb();
-  shotCache.clear();
+  if (sameWindow) for (const shot of shotCache.values()) shot.then((x) => x?.slices?.clear());
+  else shotCache.clear();
   schedulePrefetch();
 }
 
@@ -450,14 +465,22 @@ function setSmall(mode, { force = false, smooth = false } = {}) {
   S.small = mode;
   paint.useCpu = !!mode; // (see paint.frame)
   S.size = '';
-  build(false);
-  if (!shot) return false;
-  const src = imageSource(shot);
-  const rgb = S.frame.rgb;
-  for (const c of board.cells) {
-    if (!isPaint(c.abs)) continue;
-    board.set(c, slice(src, c.x, c.y, rgbHex(rgb[c.i * 3], rgb[c.i * 3 + 1], rgb[c.i * 3 + 2])));
-    board.setEdges(c, 0);
+  if (!shot) {
+    build(false);
+    return false;
+  }
+  board.hold(); // (the new board is drawn once, already showing the old one's picture)
+  try {
+    build(false);
+    const src = imageSource(shot);
+    const rgb = S.frame.rgb;
+    for (const c of board.cells) {
+      if (!isPaint(c.abs)) continue;
+      board.set(c, slice(src, c.x, c.y, rgbHex(rgb[c.i * 3], rgb[c.i * 3 + 1], rgb[c.i * 3 + 2])));
+      board.setEdges(c, 0);
+    }
+  } finally {
+    board.release();
   }
   return true;
 }
@@ -1261,8 +1284,13 @@ async function boxesToSwitches(boxes, keep = null) {
       added.push(i);
     }
   });
-  retarget(added, null, () => true);
-  for (const i of added) board.setEdges(i, 0);
+  board.hold(); // (each switch drawn once, face and edges together)
+  try {
+    retarget(added, null, () => true);
+    for (const i of added) board.setEdges(i, 0);
+  } finally {
+    board.release();
+  }
   for (const el of live) el.style.opacity = '0';
   return added;
 }
@@ -1394,18 +1422,24 @@ function finishWeb() {
   for (const el of [introEl, headerEl(), footerEl(), ...pages.map((p) => p.el)]) el.style.opacity = '';
   S.overlay = null;
   layoutWeb();
-  resetEdges();
-  // Every switch settles at once (nothing left half-flipped), in this theme's gutter (unless a
-  // sweep is still crossing the board: it hands the gutters over as it goes).
-  if (!S.sweep) for (const c of board.cells) c.gap = null;
-  // Only switches still showing (or on their way to) a piece of a card are settled at once;
-  // background switches already drifting again are left to finish their flips.
-  const onCard = (i) => {
-    const c = board.cells[i];
-    return c.cur?.t === 'slice' || c.anim?.to?.t === 'slice' || c.q.some((n) => n.f?.t === 'slice');
-  };
-  retarget(allCells(), null, onCard);
-  board.redrawAll();
+  // (Only switches whose edges, gutter or face change are redrawn, each once: a whole board of
+  // small switches is too much to redraw in one frame.)
+  board.hold();
+  try {
+    resetEdges();
+    // Every switch settles at once (nothing left half-flipped), in this theme's gutter (unless a
+    // sweep is still crossing the board: it hands the gutters over as it goes).
+    if (!S.sweep) board.settleGaps();
+    // Only switches still showing (or on their way to) a piece of a card are settled at once;
+    // background switches already drifting again are left to finish their flips.
+    const onCard = (i) => {
+      const c = board.cells[i];
+      return c.cur?.t === 'slice' || c.anim?.to?.t === 'slice' || c.q.some((n) => n.f?.t === 'slice');
+    };
+    retarget(allCells(), null, onCard);
+  } finally {
+    board.release();
+  }
   if (!reduce.matches) paintStep(performance.now()); // the background drift carries straight on
   schedulePrefetch();
 }
@@ -1807,8 +1841,7 @@ function sweepStep(now) {
   }
   if (el > sw.end) {
     S.sweep = null;
-    for (const c of board.cells) c.gap = null;
-    board.redrawAll();
+    board.settleGaps();
     paintStep(now); // the ordinary drift carries straight on
   }
 }
