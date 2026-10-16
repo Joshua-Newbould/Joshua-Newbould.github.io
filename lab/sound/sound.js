@@ -348,6 +348,11 @@ export class FlapSound {
     this.level();
   }
 
+  /** Play every tick at `v` times its speed instead of the sound's own (null: the sound's own). */
+  setSpeed(v) {
+    this.speed = v == null ? null : clamp(v, 0.25, 2);
+  }
+
   save() {
     try { localStorage.setItem(KEY, this.want ? 'on' : 'off'); } catch {}
   }
@@ -517,7 +522,7 @@ export class FlapSound {
       if (set[k] === this.last) k = (k + 1) % set.length;
       const s = this.ctx.createBufferSource();
       s.buffer = this.last = set[k];
-      const r = (s.playbackRate.value = p.speed * (1 + (Math.random() * 2 - 1) * p.rateJit));
+      const r = (s.playbackRate.value = (this.speed ?? p.speed) * (1 + (Math.random() * 2 - 1) * p.rateJit));
       const gn = this.ctx.createGain();
       // A cluster: this module stepped just after the last one, a little quieter.
       const near = prev >= 0 && Math.random() < p.cluster * busy;

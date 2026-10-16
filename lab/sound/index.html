@@ -60,6 +60,8 @@
 
   <h2>Volume</h2>
   <div class="vol"><input id="vol" type="range" min="0" max="1" step="0.01" value="0.6" aria-label="Volume"><span id="volv">60</span></div>
+  <h2>Speed (lower = slower, longer ticks)</h2>
+  <div class="vol"><input id="spd" type="range" min="0.5" max="1.2" step="0.01" value="0.85" aria-label="Speed"><span id="spdv">85%</span></div>
 
   <div id="status" aria-live="polite">Sound off. Press anything to start.</div>
   <div id="meter"><i></i></div>
@@ -125,6 +127,12 @@ vol.addEventListener('input', () => {
   document.getElementById('volv').textContent = Math.round(vol.value * 100);
 });
 sound.setVolume(+vol.value);
+const spd = document.getElementById('spd');
+spd.addEventListener('input', () => {
+  sound.setSpeed(+spd.value);
+  document.getElementById('spdv').textContent = Math.round(spd.value * 100) + '%';
+});
+sound.setSpeed(+spd.value);
 
 // Play the frames at the display's rate, one simulated 60 fps frame per real one (near enough).
 let lastMs = 0, acc = 0;
