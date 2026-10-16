@@ -84,7 +84,7 @@ const SNAP = {
 };
 
 export const VARIANTS = {
-  pragotron: { kind: 'sample', ...CHAIN, ...DENSITY, rateJit: 0.05, level: 0, hpF: 200, shelfDb: -1.5 },
+  pragotron: { kind: 'sample', ...CHAIN, ...DENSITY, rateJit: 0.05, level: 0, hpF: 200, shelfDb: -1.5, room: 0.3 },
   snap: { kind: 'snap', ...SNAP, ...CHAIN, ...DENSITY, rateJit: 0.02, level: -1 },
   metal: { kind: 'metal', ...METAL, ...CHAIN, ...DENSITY, shelfDb: -2, level: -2.5 },
 };
@@ -350,7 +350,13 @@ export class FlapSound {
 
   /** Play every tick at `v` times its speed instead of the sound's own (null: the sound's own). */
   setSpeed(v) {
-    this.speed = v == null ? null : clamp(v, 0.25, 2);
+    this.speed = v == null ? null : clamp(v, 0.05, 2);
+  }
+
+  /** How much of the recording's room the recorded ticks keep: 1 as recorded, 0 dry (each
+   *  tick's click and its first moments only; null: the sound's own). */
+  setRoom(v) {
+    this.room = v == null ? null : clamp(v, 0, 1);
   }
 
   save() {
@@ -529,10 +535,18 @@ export class FlapSound {
       let lv = g * db(p.makeup - p.spread * Math.pow(Math.random(), p.skew)) * (isLand && !pool.lands ? db(p.landDb) : 1);
       if (near) lv *= db(rand(p.clusterDb[0], p.clusterDb[1]));
       gn.gain.value = lv;
+      // (The recording's room is in each tick's tail: past its first 6 ms, fade it as fast as
+      // `room` asks, from 8 ms (dry) to as recorded.)
+      const room = p.kind === 'sample' ? this.room ?? p.room : 1;
       const at = clamp(pan + (Math.random() * 2 - 1) * spread, -1, 1);
       s.connect(gn).connect(this.buses[Math.round(((at + 1) / 2) * (PANS - 1))]);
       const when = near ? prev + rand(p.clusterMs[0], p.clusterMs[1]) / 1000 : t + ((i + rand(0.1, 0.9)) / count) * dt;
       prev = when;
+      if (room < 1) {
+        const at = when + 0.006 / r; // (times in the tick's own time: slowed down with it)
+        gn.gain.setValueAtTime(lv, at);
+        gn.gain.setTargetAtTime(0, at, (0.008 + 0.09 * room) / r);
+      }
       ends.push(when + s.buffer.duration / r);
       s.onended = () => gn.disconnect();
       s.start(when);
