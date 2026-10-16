@@ -40,7 +40,6 @@ const themeToggle = $('#theme-toggle');
 const themeSwitches = () => $$('.theme-switch'); // the header's, and the title box's
 /** The theme switch on screen now. */
 const liveSwitch = () => (S.key === 'intro' ? $('#intro-theme') : themeToggle);
-const brushToggle = $('#brush-toggle');
 const touchy = matchMedia('(hover: none), (pointer: coarse)'); // a touch screen first (no keyboard for the secret codes)
 const prevBtn = $('[data-board="prev"]');
 const nextBtn = $('[data-board="next"]');
@@ -100,16 +99,14 @@ for (const pg of pages) {
   bar.className = 'w-bar';
   bar.setAttribute('aria-hidden', 'true');
   bar.innerHTML = '<span class="w-dot"></span><span class="w-path">JN://<b>home</b></span><span class="w-stripes"><i></i><i></i><i></i><i></i></span>';
-  // The brush, ASCII mode and the sun/moon switch, here too, so they can be chosen before entering.
-  const brush = brushToggle.cloneNode(true);
-  brush.id = 'intro-brush';
+  // ASCII mode and the sun/moon switch, here too, so they can be chosen before entering.
   const ascii = $('#ascii-toggle').cloneNode(true);
   ascii.id = 'intro-ascii';
   const sw = themeToggle.cloneNode(true);
   sw.id = 'intro-theme';
   bar.removeAttribute('aria-hidden');
   for (const n of bar.querySelectorAll('.w-dot, .w-path, .w-stripes')) n.setAttribute('aria-hidden', 'true');
-  bar.append(brush, ascii, sw);
+  bar.append(ascii, sw);
   introEl.prepend(bar);
   const status = document.createElement('div');
   status.className = 'w-statusline';
@@ -172,7 +169,6 @@ const S = {
   size: '',
   brush: null,
   lite: false, // no usable GPU (or too slow): bigger switches, a lighter background
-  brushOn: false, // the paint brush works only while its button is on (off on every visit)
   ascii: false, // ASCII mode (the header's >_ button): the background as coloured characters
   player: null, // Bad Apple!! playing on the board (see badapple.js); 'loading' while it loads
   small: false, // smaller switches: 'ascii' (half size, two by two to a switch) or 'apple' (Bad Apple)
@@ -585,20 +581,6 @@ function layoutWebBoxes() {
     return r;
   };
 
-  // Title screen: a box in the centre, shrink-wrapped to the name.
-  {
-    const hid = introEl.hidden;
-    introEl.hidden = false;
-    Object.assign(introEl.style, { width: 'max-content', height: 'auto' });
-    // (Wide enough for the name, and for the strip with its buttons.)
-    const strip = $('.w-bar', introEl);
-    const need = Math.max(introEl.offsetWidth, strip ? [...strip.children].reduce((n, c) => n + c.offsetWidth + 10, 40) : 0);
-    const w = Math.min(all - 2 * (narrow ? 2 : 3), Math.ceil((need + gap) / cw) + 2);
-    introEl.hidden = hid;
-    const h = Math.min(rows - 2, measure(introEl, w) + 2);
-    place(introEl, Math.floor((all - w) / 2), Math.floor((rows - h) / 2), w, h);
-  }
-
   const bw = inset ? span : all;
   const bc = inset ? c0 : 0;
   // Header and footer: the roomiest layout that fits on one line each (short screens keep
@@ -644,6 +626,16 @@ function layoutWebBoxes() {
     }
     const h = p.rows(rowsFor, span);
     place(p.el, c0, top + Math.max(0, Math.min(topOff, room - h)), span, h); // (never into the footer)
+  }
+
+  // The title window sits where the cards sit (same top, same width), so entering the site
+  // turns one window into the next in place.
+  {
+    const hid = introEl.hidden;
+    introEl.hidden = false;
+    const h = Math.min(room, measure(introEl, span) + 2);
+    introEl.hidden = hid;
+    place(introEl, c0, top + Math.max(0, Math.min(topOff, room - h)), span, h);
   }
 }
 
@@ -803,8 +795,8 @@ function shotKey(el) {
           ? $('#intro-theme').getAttribute('aria-checked')
           : el.dataset.part || '';
   const accent = document.documentElement.style.getPropertyValue('--accent');
-  // (The header and title carry the brush and ASCII buttons, which look pressed while on.)
-  const tools = el === headerEl() || el === introEl ? `${S.brushOn ? 'B' : ''}${S.ascii ? 'A' : ''}` : '';
+  // (The header and title carry the ASCII button, which looks pressed while on.)
+  const tools = el === headerEl() || el === introEl ? `${S.ascii ? 'A' : ''}` : '';
   return [el.id || el.tagName, extra, tools, accent, S.dark, look.palette, look.chrome, look.font, document.documentElement.dataset.card + ('console' in document.documentElement.dataset ? '+c' : ''), board.dpr, r.left, r.top, r.width, r.height].join('|');
 }
 function snapshot(el) {
@@ -1801,6 +1793,7 @@ const HOLD_MS = 200; // press this long without moving (or drag) to start painti
 const RESPLASH_MS = 420; // a still, held pointer keeps re-painting its patch
 
 const brushBoxes = new Map(); // element -> { ready, cells, waiting }
+// The boxes on top of the board (the sections, bars and title), which the brush leaves alone.
 const brushable = () => [headerEl(), footerEl(), morphBox()].filter((el) => el && !el.closest('[hidden]'));
 function boxAtCell(i) {
   if (S.overlay) return null;
@@ -1811,26 +1804,6 @@ function boxAtCell(i) {
       return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
     }) || null
   );
-}
-/** Put a section into switch mode (once); calls back when its switches are on the board. */
-function brushBox(el, then) {
-  let st = brushBoxes.get(el);
-  if (st) return st.ready ? then() : st.waiting.push(then);
-  st = { ready: false, cells: new Set(), waiting: [then] };
-  brushBoxes.set(el, st);
-  snapshot(el).then((shot) => {
-    if (brushBoxes.get(el) !== st || !shot) return brushBoxes.delete(el);
-    S.brushMap ||= new Map();
-    for (const [i, f] of slicesOf(shot, cardBg(el))) {
-      S.brushMap.set(i, f);
-      st.cells.add(i);
-    }
-    retarget([...st.cells], null, () => true);
-    for (const i of st.cells) board.setEdges(i, 0);
-    el.style.opacity = '0'; // still receives clicks; the switches show it
-    st.ready = true;
-    for (const f of st.waiting.splice(0)) f();
-  });
 }
 /** Once a stroke has settled, painted sections become normal web sections again. */
 let brushRestoreTimer = 0;
@@ -1932,15 +1905,9 @@ function splash(x, y, again = false) {
       s.splash = now;
       s.mask = mask;
       const delay = rand() * 40;
-      const box = boxAtCell(j);
-      if (box) {
-        // (Over a section the switches stay bare, as the section is: no board gutters round them.)
-        brushBox(box, () => {
-          const base = heldFace(s);
-          board.flip(s, base, { delay: delay + 50, steps: brushPath(base, mask), stepDur: 85, dur: 190 });
-        });
-        continue;
-      }
+      // (The sections, bars and title sit on top, also while they are switches in a transition:
+      // the brush paints the board.)
+      if (boxAtCell(j) || !isPaint(s.abs)) continue;
       // The switch holds what it shows while the brush is at work, and goes back to it after;
       // the background's drift takes it up again from there.
       const base = heldFace(s);
@@ -1986,14 +1953,14 @@ function dropBrush() {
   restoreBrushBoxes();
 }
 
-function startBrush(e) {
+function startBrush(e, flickOnly = false) {
   dropBrush();
   const b = { id: e.pointerId, x: e.clientX, y: e.clientY, last: board.cellAt(e.clientX, e.clientY), painting: false, moved: false, lastSplash: 0, t0: performance.now() };
   // On a touch screen, a press on a card with parts may be a flick: don't paint straight away.
   b.flick = e.pointerType !== 'mouse' && !!e.target.closest?.('section.paged');
   // The brush paints only while its button is on (and never with reduced motion); a press
   // still counts when it might be a flick on a card, which turns the card's part.
-  b.noPaint = !S.brushOn || reduce.matches;
+  b.noPaint = flickOnly || reduce.matches;
   if (b.noPaint && !b.flick) return;
   try {
     e.target.setPointerCapture(e.pointerId);
@@ -2029,8 +1996,8 @@ function brushMove(e) {
 
 canvas.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 || !e.isPrimary) return;
-  // (On the title screen a press enters, unless the brush is on: then a tap enters and a hold paints.)
-  if (S.key === 'intro' && (!S.brushOn || reduce.matches)) return enter({ x: e.clientX, y: e.clientY });
+  // (On the title screen a tap enters and a hold or drag paints.)
+  if (S.key === 'intro' && reduce.matches) return enter({ x: e.clientX, y: e.clientY });
   startBrush(e);
 });
 // On the sections a press-and-hold (or drag) paints too; clicks on links and buttons work as usual.
@@ -2038,8 +2005,9 @@ source.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 || !e.isPrimary || e.target.closest('button')) return;
   // Links work as usual, except that a touch on a card with parts may also be a flick.
   if (e.target.closest('a') && (e.pointerType === 'mouse' || !e.target.closest('section.paged'))) return;
-  if (S.key === 'intro' && (!S.brushOn || reduce.matches)) return enter({ x: e.clientX, y: e.clientY });
-  startBrush(e);
+  if (S.key === 'intro') return enter({ x: e.clientX, y: e.clientY });
+  // (The brush paints only the board; a touch on a card with parts may be a flick, to turn it.)
+  if (e.pointerType !== 'mouse' && e.target.closest('section.paged')) startBrush(e, true);
 });
 for (const el of [canvas, source]) {
   el.addEventListener('pointermove', (e) => {
@@ -2086,24 +2054,16 @@ $('#enter').addEventListener('click', () => enter());
 prevBtn.addEventListener('click', () => step(-1, centreOf(prevBtn)));
 nextBtn.addEventListener('click', () => step(1, centreOf(nextBtn)));
 for (const t of themeSwitches()) t.addEventListener('click', toggleTheme);
-// With the brush off, a click on the board (not a drag or paint stroke) moves the page to its
+// A click on the board (a quick press: not a hold or drag, which paint) moves the page to its
 // next colour combo, rippling out from the click.
 let pressedAt = null;
 canvas.addEventListener('pointerdown', (e) => (pressedAt = [e.clientX, e.clientY]));
 canvas.addEventListener('click', (e) => {
-  if (S.brushOn || S.key === 'intro' || performance.now() - (S.paintedAt || 0) < 300) return;
+  if (S.key === 'intro' || performance.now() - (S.paintedAt || 0) < 300) return;
   if (pressedAt && Math.hypot(e.clientX - pressedAt[0], e.clientY - pressedAt[1]) > 8) return; // (a drag)
   pulseCombo({ x: e.clientX, y: e.clientY });
 });
-// The brush and ASCII mode each have a button in the header and one on the title screen.
-for (const btn of $$('.brush-btn')) {
-  btn.addEventListener('click', () => {
-    S.brushOn = !S.brushOn;
-    for (const b of $$('.brush-btn')) b.setAttribute('aria-pressed', String(S.brushOn));
-    document.documentElement.classList.toggle('brush-on', S.brushOn);
-    if (!S.brushOn) dropBrush();
-  });
-}
+// ASCII mode has a button in the header and one on the title screen.
 
 const options = mountOptions(look, onLookChange);
 

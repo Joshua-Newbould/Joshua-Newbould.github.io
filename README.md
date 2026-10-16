@@ -47,11 +47,12 @@ Press **D** (or open `?design`) for a panel to switch them live, or set them in 
 `?palette=graphite&bg=contour&motion=ripple`. The choice is remembered in the browser. To settle
 on one for good, change `DEFAULT_LOOK` in `js/design.js`.
 
-With the Mineral palette each page also has three colour combos (`COMBOS`): with the brush off, a
-click on the background ripples into the next one.
+With the Mineral palette each page also has three colour combos (`COMBOS`): a click on the
+background ripples into the next one. Holding or dragging on the background paints it with a
+character brush instead (the sections, bars and title window sit on top and aren't painted).
 
-The header (and the title screen) also has a paint brush and an ASCII mode (`>_`), which turns
-the background into coloured characters on finer switches.
+The header (and the title window) has an ASCII mode (`>_`), which turns the background into
+coloured characters on finer switches.
 
 Colours are built in OKLCH, so lightness and colourfulness stay even across each page's hue
 (by default About apricot, Research indigo, Publications fuchsia, Contact lagoon), held in a soft band
