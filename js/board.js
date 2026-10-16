@@ -122,7 +122,9 @@ export class Board {
     const cols = Math.ceil(W / cw);
     const rows = Math.ceil(H / ch);
     const fullRows = Math.floor(H / ch);
-    return { cssW, cssH, dpr, W, H, cw, ch, cols, rows, fullRows, ox: -Math.floor((cols * cw - W) / 2), oy: 0 };
+    // (The grid is centred both ways: the part-cut rows and columns are shared between the edges.)
+    const oy = -Math.floor((rows * ch - H) / 2);
+    return { cssW, cssH, dpr, W, H, cw, ch, cols, rows, fullRows: Math.floor((H - oy) / ch), ox: -Math.floor((cols * cw - W) / 2), oy };
   }
 
   /** The same board with each switch split into k × k smaller ones, on exactly the same lines. */

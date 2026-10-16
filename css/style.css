@@ -151,7 +151,7 @@ body {
 .js [tabindex="-1"]:focus {
   outline: none;
 }
-.js button {
+:where(.js) button {
   font: inherit;
   color: inherit;
   background: none;
@@ -166,12 +166,13 @@ body {
   display: flex;
   align-items: center;
   gap: 0.75rem 2rem;
-  padding: 0 calc(var(--inset, 2rem) + 28px);
+  padding: 0 calc(var(--inset, 2rem) + var(--pad-x));
+  padding-top: var(--cut, 0px); /* (the board's top row may be cut: the content sits below it) */
   background: var(--bar);
 }
 #site-name {
   font: 600 11.5px/1 var(--mono);
-  letter-spacing: 0.22em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   text-decoration: none;
   color: var(--text) !important;
@@ -185,8 +186,8 @@ body {
 #site-nav a {
   position: relative;
   white-space: nowrap;
-  font: 500 11px/1 var(--mono);
-  letter-spacing: 0.18em;
+  font: 500 11.5px/1 var(--mono);
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   text-decoration: none;
   color: var(--muted);
@@ -214,7 +215,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0 calc(var(--inset, 2rem) + 28px);
+  padding: 0 calc(var(--inset, 2rem) + var(--pad-x));
   background: var(--bar);
   font: 500 10.5px/1 var(--mono);
   letter-spacing: 0.18em;
@@ -241,10 +242,10 @@ body {
   min-width: calc(12ch + 12 * 0.18em + 1.8em);
 }
 .foot-nav [data-board="prev"] {
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 .foot-nav [data-board="next"] {
-  justify-content: flex-start;
+  justify-content: flex-end; /* (the → always ends on the content edge) */
 }
 .js #site > footer.arrows .foot-nav .lbl {
   display: none;
@@ -269,8 +270,8 @@ body {
 }
 /* The page transition, chosen by the visitor: sweep or ripple. */
 .foot-opt {
-  padding: 8px 4px;
-  margin: -8px -4px;
+  padding: 10px 6px;
+  margin: -10px -6px;
   letter-spacing: inherit;
   text-transform: inherit;
   color: var(--muted);
@@ -402,6 +403,8 @@ html:not(.js) .foot-opt {
 }
 .tool-btn:hover,
 .secret-btn:hover {
+  background: color-mix(in srgb, var(--text) 8%, var(--surface));
+  box-shadow: inset 0 0 0 1px var(--muted);
   color: var(--text);
 }
 .tool-btn[aria-pressed="true"],
@@ -491,9 +494,21 @@ html:not(.js) .foot-opt {
 
 /* ---------- Page cards ---------- */
 
-.js main section[data-page] {
+/* The content edge, shared by the bars, the cards' strips and their text. */
+.js {
   --pad-y: 30px;
   --pad-x: 40px;
+}
+.js[data-vp~="short"] {
+  --pad-y: 18px;
+  --pad-x: 26px;
+}
+.js[data-vp~="phone"] {
+  --pad-y: 16px;
+  --pad-x: 16px;
+}
+.js main section[data-page] {
+  container-type: inline-size; /* (titles and grids follow the card's width, also in snapshots) */
   overflow: hidden; /* contents fit or split into parts (see the script); pages never scroll */
   padding: var(--pad-y) var(--pad-x);
   background: var(--surface);
@@ -513,7 +528,7 @@ html:not(.js) .foot-opt {
 .w-index {
   margin: 0 0 16px;
   font: 500 10.5px/1 var(--mono);
-  letter-spacing: 0.22em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--muted);
 }
@@ -526,7 +541,7 @@ html:not(.js) .foot-opt {
   margin: 0 0 6px; /* the title groups with the line under it */
   font-family: var(--display);
   font-weight: var(--display-weight);
-  font-size: calc(clamp(30px, 3.6vw, 54px) * var(--display-scale));
+  font-size: calc(clamp(30px, 6cqi, 54px) * var(--display-scale));
   line-height: 1;
   letter-spacing: var(--display-track);
   text-transform: uppercase;
@@ -534,7 +549,7 @@ html:not(.js) .foot-opt {
 }
 .js [data-strip] {
   margin: 0;
-  font: 500 11px/1.9 var(--mono);
+  font: 500 11.5px/1.9 var(--mono);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--soft);
@@ -574,11 +589,17 @@ html:not(.js) .foot-opt {
   grid-template-columns: repeat(2, minmax(0, 1fr)); /* four interests: always 2 × 2 */
   gap: 26px 40px;
 }
+@container (max-width: 700px) {
+  .js #research ul {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+}
 .js #research h3 {
-  margin: 3px 0 6px;
-  font: 600 12px/1.5 var(--mono);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  margin: 4px 0 6px;
+  font: 600 13.5px/1.35 var(--mono);
+  letter-spacing: 0;
+  color: var(--text);
 }
 .js #research li p {
   margin: 0;
@@ -600,9 +621,9 @@ html:not(.js) .foot-opt {
 }
 .js #publications li {
   display: grid;
-  grid-template-columns: 5rem minmax(0, 1fr) 6.5rem; /* every row the same text width */
+  grid-template-columns: 6rem minmax(0, 1fr) 6.5rem; /* every row the same text width; the text on the facts' value column */
   align-items: baseline;
-  gap: 2px 1.5rem;
+  gap: 2px 1.75rem;
   padding: 16px 0;
   border-top: 1px solid var(--line);
 }
@@ -626,13 +647,25 @@ html:not(.js) .foot-opt {
   color: var(--text);
   text-decoration: none;
 }
-.js .pub-title:hover {
+.js .pub-title {
+  text-wrap: pretty;
+}
+.js .pub-title:hover,
+.js .pub-title:focus-visible {
   color: var(--accent);
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 .js .pub-authors,
 .js .pub-venue {
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.pub-authors .me {
+  font-weight: 600;
+  color: var(--text); /* (the author's own name stands out) */
 }
 
 /* About: facts beside the biography on wide screens (and on short landscape ones, where
@@ -710,7 +743,7 @@ html:not(.js) .foot-opt {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 0 calc(var(--inset, 2rem) + 28px);
+  padding: 0 calc(var(--inset, 2rem) + var(--pad-x));
   background: var(--surface);
 }
 .js #intro h1 {
@@ -728,10 +761,9 @@ html:not(.js) .foot-opt {
   display: block; /* the first name over the last */
 }
 .js #intro p {
-  margin: 22px -0.32em 0 0; /* (cancels the tracking after the last letter: optically centred) */
+  margin: 22px -0.28em 0 0; /* (cancels the tracking after the last letter: optically centred) */
   font: 500 clamp(13px, 1.15vw, 16px)/1 var(--mono);
-  letter-spacing: 0.32em;
-  text-transform: uppercase;
+  letter-spacing: 0.28em; /* ('PhD student', as written) */
   color: var(--muted);
 }
 /* Keyboard users can Tab to an "Enter site" button; it shows only while focused. */
@@ -785,16 +817,17 @@ html:not(.js) .foot-opt {
   gap: 10px;
   height: 30px;
   margin: 0 calc(-1 * var(--pad-x)) 22px;
-  padding: 0 14px;
+  padding: 0 var(--pad-x); /* (the path on the content edge, the dot hung in the margin) */
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--text) 4%, var(--surface));
-  font: 500 10px/1 var(--mono);
-  letter-spacing: 0.2em;
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--muted);
   white-space: nowrap;
 }
 .w-dot {
+  margin-left: -16px;
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -831,16 +864,16 @@ html:not(.js) .foot-opt {
   bottom: 19px;
   display: flex;
   gap: 18px;
-  font: 500 9.5px/1 var(--mono);
-  letter-spacing: 0.2em;
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.18em;
   color: var(--muted);
   opacity: 0.8;
   white-space: nowrap;
 }
 .js[data-card="window"] main section.paged .w-pager {
   bottom: 9px;
-  font-size: 9.5px;
-  letter-spacing: 0.2em;
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
 }
 .js[data-card="window"] main section.paged .w-pager .pg-num {
   opacity: 0.8;
@@ -903,8 +936,8 @@ html:not(.js) .foot-opt {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--st4) 22%, transparent);
 }
 .js #intro .w-statusline {
-  left: 16px;
-  right: 16px;
+  left: var(--pad-x);
+  right: var(--pad-x);
   justify-content: space-between;
 }
 .js[data-card="window"][data-vp~="phone"] main .w-statusline span + span {
@@ -1043,15 +1076,15 @@ html:not(.js) .foot-opt {
 /* Header and footer share one inset: when either needs the tighter one, both take it. */
 .js #site > header.pad-tight,
 .js #site > footer.pad-tight {
-  padding-left: 16px;
-  padding-right: 16px;
+  padding-left: max(16px, var(--inset, 16px));
+  padding-right: max(16px, var(--inset, 16px));
 }
 .js #site > header.compact #site-nav {
   gap: 1.3rem;
 }
 .js #site > header.stack {
   flex-wrap: wrap;
-  padding: 12px 16px;
+  padding: calc(var(--cut, 0px) + 12px) 16px 12px;
   gap: 12px 16px;
 }
 .js #site > header.stack #site-nav {
@@ -1085,10 +1118,6 @@ html:not(.js) .foot-opt {
   gap: 1.25rem;
 }
 
-.js[data-vp~="short"] main section[data-page] {
-  --pad-y: 18px;
-  --pad-x: 26px;
-}
 /* A card too tall for the screen is split into parts (see fitCard): numbered, with controls in
    its bottom-right corner, flipped through like pages. The page itself never scrolls. */
 .w-pager {
@@ -1153,24 +1182,23 @@ html:not(.js) .foot-opt {
   }
 }
 .w-pager button:disabled {
-  color: var(--line);
+  color: var(--muted);
+  opacity: 0.35;
   cursor: default;
 }
-.w-pager button:focus-visible {
-  outline: 1px solid var(--accent);
+.w-pager button {
+  position: relative;
+}
+.js[data-vp~="touch"] .w-pager button::before {
+  content: "";
+  position: absolute;
+  inset: -7px; /* (a 44px target for a finger) */
 }
 .w-pager .pg-num {
   min-width: 4.2em;
   text-align: center;
 }
 
-.js[data-vp~="phone"] #site > footer {
-  padding: 0 16px;
-}
-.js[data-vp~="phone"] main section[data-page] {
-  --pad-y: 16px;
-  --pad-x: 16px;
-}
 .js[data-vp~="phone"] #publications li {
   grid-template-columns: 1fr;
 }
@@ -1263,4 +1291,43 @@ html:not(.js) footer {
 .playing #source,
 .playing .card-shadow {
   visibility: hidden;
+}
+
+/* One focus language: a 2px accent ring, 3px out; the nav shows focus as a soft wash. */
+.js :focus-visible {
+  outline-offset: 3px;
+}
+.js #site-nav a:focus-visible {
+  outline: none;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+/* A press answers at once. */
+@media (prefers-reduced-motion: no-preference) {
+  .js :is(.foot-nav button, .foot-opt, .w-pager button:not(:disabled), #site-nav a):active {
+    transform: translateY(1px);
+  }
+  .js :is(.tool-btn, .secret-btn, .theme-switch):active {
+    transform: scale(0.94);
+  }
+}
+.theme-switch:hover .tt-track {
+  box-shadow: inset 0 0 0 1px var(--muted);
+}
+/* On the title window's inverted strip, its controls are drawn as outlines on the dark. */
+.js[data-console] #intro .w-bar .tool-btn {
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  color: var(--surface);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--surface) 40%, var(--text));
+}
+.js[data-console] #intro .w-bar .tool-btn[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+}
+.js[data-console] #intro .w-bar .tt-track {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--surface) 40%, var(--text));
 }

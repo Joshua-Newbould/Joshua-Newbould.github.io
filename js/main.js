@@ -130,7 +130,8 @@ function showPart(pg) {
   pg.el.classList.toggle('paged', paged);
   pg.el.classList.toggle('later', pg.part > 0); // parts after the first drop the repeated lines
   pg.el.dataset.part = paged ? `${pg.part + 1}/${parts.length}` : '';
-  $('.pg-num', pg.pager).textContent = `${pg.part + 1} / ${parts.length}`;
+  const two = (n) => String(n).padStart(2, '0');
+  $('.pg-num', pg.pager).textContent = `${two(pg.part + 1)}/${two(parts.length)}`; // (as the status line's 'SEC 01/04')
   const prev = $('.pg-prev', pg.pager);
   const next = $('.pg-next', pg.pager);
   const focused = document.activeElement;
@@ -288,7 +289,8 @@ function paintFace(r, g, b, ascii = S.ascii) {
   // (Colours rounded to 32 levels a channel, so the characters' bitmaps can be shared.)
   const q = (v) => Math.min(255, Math.round(v / 8) * 8);
   const fg = rgbHex(q(r), q(g), q(b));
-  const f = glyph(rampChar((luma(r, g, b) - lo) / Math.max(1, hi - lo)), fg, ASCII_FACE, 600);
+  const t = Math.max(0, Math.min(1, (luma(r, g, b) - lo) / Math.max(1, hi - lo)));
+  const f = glyph(rampChar(t ** 0.75), fg, ASCII_FACE, 600); // (a gentle curve: the denser characters come in sooner)
   f.avg = fg; // (blends between faces go by the character's colour, not the black)
   return f;
 }
@@ -298,18 +300,15 @@ const RAMP = '.,:;=+*#%@';
 const rampChar = (t) => RAMP[Math.max(0, Math.min(RAMP.length - 1, Math.floor(t * RAMP.length)))];
 /** Rec. 709 luma of an sRGB colour (0–255 channels), close enough to choose a character. */
 const luma = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
-/** The darkest and lightest background on the board now (characters span the whole range). */
+/** The board's range of lightness now, from its 5th to its 95th percentile (so a few outliers
+ *  don't squeeze everything else into the faintest characters). */
 function frameLuma() {
   const fr = S.frame;
   if (!fr.luma) {
-    let lo = 255;
-    let hi = 0;
-    for (let k = 0; k < fr.rgb.length; k += 3) {
-      const l = luma(fr.rgb[k], fr.rgb[k + 1], fr.rgb[k + 2]);
-      if (l < lo) lo = l;
-      if (l > hi) hi = l;
-    }
-    fr.luma = [lo, hi];
+    const ls = [];
+    for (let k = 0; k < fr.rgb.length; k += 3 * 5) ls.push(luma(fr.rgb[k], fr.rgb[k + 1], fr.rgb[k + 2]));
+    ls.sort((a, b) => a - b);
+    fr.luma = [ls[Math.floor(ls.length * 0.05)] ?? 0, ls[Math.floor(ls.length * 0.95)] ?? 255];
   }
   return fr.luma;
 }
@@ -541,7 +540,8 @@ function layoutWebBoxes() {
     const w = G.cssW;
     const h = G.cssH;
     const short = h <= 560 && w > h;
-    document.documentElement.dataset.vp = [w < 640 && 'phone', (w >= 1000 || (w >= 800 && short)) && 'wide', short && 'short', touchy.matches && 'touch'].filter(Boolean).join(' ');
+    // ('phone' layouts are for narrow portrait screens; a phone on its side is 'short'.)
+    document.documentElement.dataset.vp = [w < 640 && !short && 'phone', (w >= 1000 || (w >= 800 && short)) && 'wide', short && 'short', touchy.matches && 'touch'].filter(Boolean).join(' ');
   }
   const dpr = G.dpr;
   const cw = G.cw / dpr;
@@ -586,7 +586,7 @@ function layoutWebBoxes() {
   // Header and footer: the roomiest layout that fits on one line each (short screens keep
   // the nav on the header's row as long as they can, since height is what they lack).
   const short = G.cssH <= 560 && G.cssW > G.cssH;
-  fitBar(headerEl(), bw * cw - gap, short ? [[], ['compact'], ['compact', 'tight'], ['stack', 'tight'], ['stack', 'tight', 'abbr']] : [[], ['compact'], ['stack'], ['stack', 'tight'], ['stack', 'tight', 'abbr']]);
+  fitBar(headerEl(), bw * cw - gap, short ? [[], ['compact'], ['compact', 'tight'], ['compact', 'tight', 'abbr'], ['stack', 'tight', 'abbr']] : [[], ['compact'], ['stack'], ['stack', 'tight'], ['stack', 'tight', 'abbr']]);
   fitBar(footerEl(), bw * cw - gap, [[], ['compact'], ['nocopy'], ['nocopy', 'compact'], ['nocopy', 'compact', 'notool'], ['nocopy', 'compact', 'notool', 'arrows']]);
   {
     // Header and footer share one inset.
@@ -596,13 +596,33 @@ function layoutWebBoxes() {
     hd.classList.toggle('pad-tight', tight);
     ft.classList.toggle('pad-tight', tight);
   }
-  const hh = measure(headerEl(), bw);
-  footerEl().style.paddingBottom = ''; // measured without the overhang padding (set below)
-  const fh = measure(footerEl(), bw);
+  // The grid is centred, so its top and bottom rows are cut about equally. Each bar covers its
+  // cut row and as many whole rows as its content needs, and is at least BAR_MIN tall where it
+  // shows: the header and footer come out the same height (their content in the visible part).
+  const cutTop = Math.max(0, -G.oy / G.dpr); // (hidden above the window)
+  const over = inset ? 0 : G.rows - rows; // (rows partly below the window)
+  const seenBottom = over ? G.cssH - (G.oy + rows * G.ch) / G.dpr : 0; // (how much of that row shows)
+  const barMin = short ? 0 : 40; // (a phone on its side keeps every pixel of height for the cards)
+  const contentOf = (el) => {
+    const [hid, sh] = [el.hidden, siteEl.hidden];
+    el.hidden = siteEl.hidden = false;
+    Object.assign(el.style, { width: `${bw * cw - gap}px`, height: 'auto' });
+    const px = el.scrollHeight;
+    el.hidden = hid;
+    siteEl.hidden = sh;
+    return px;
+  };
+  headerEl().style.setProperty('--cut', '0px');
+  footerEl().style.paddingBottom = '';
+  const needH = Math.max(barMin, contentOf(headerEl()));
+  const needF = Math.max(barMin, contentOf(footerEl()));
+  const seenTop = cutTop ? ch - cutTop : 0;
+  const hh = (cutTop ? 1 : 0) + Math.max(0, Math.ceil((needH - seenTop + gap) / ch));
+  const fh = Math.max(0, Math.ceil((needF - seenBottom + gap) / ch));
+  headerEl().style.setProperty('--cut', `${cutTop}px`);
   const top0 = inset ? 1 : 0;
   place(headerEl(), bc, top0, bw, hh);
   // The full-width footer also covers a part-visible last row; its text stays centred in the visible part.
-  const over = inset ? 0 : G.rows - rows;
   if (over) footerEl().style.paddingBottom = `${(over * G.ch) / G.dpr - (G.cssH - (G.oy + rows * G.ch) / G.dpr)}px`;
   if (inset) place(footerEl(), bc, rows - 1 - fh, bw, fh);
   else place(footerEl(), 0, rows - fh, all, fh + over);
@@ -612,28 +632,36 @@ function layoutWebBoxes() {
   const vgap = narrow ? 2 : 1;
   const top = top0 + hh + vgap;
   const room = rows - (inset ? 1 : 0) - fh - vgap - top;
-  const maxRows = Math.max(6, Math.floor(room * (narrow ? 0.8 : 0.76)));
-  // Every card's top sits at the same spot: where the tallest card allowed would be centred.
-  const topOff = short ? 0 : Math.max(0, Math.floor((room - maxRows) / 2));
+  // A card may use most of the height (more on a portrait screen) before it splits into parts.
+  const portrait = G.cssH > G.cssW;
+  const maxRows = Math.max(6, Math.floor(room * (portrait ? 0.9 : 0.84)));
+  // Fit every card (hidden ones too), so all of them can share one top: where the tallest is centred.
+  const heights = new Map();
+  const sh = siteEl.hidden;
+  siteEl.hidden = false;
   for (const p of pages) {
-    if (p.el.hidden) continue;
-    const key = [span, maxRows, cw, look.font, look.chrome, look.card, document.documentElement.dataset.vp].join('|');
+    const hid = p.el.hidden;
+    p.el.hidden = false;
+    const key = [span, maxRows, room, cw, ch, look.font, look.chrome, look.card, document.documentElement.dataset.vp].join('|');
     if (p.fitKey !== key) {
       p.fitKey = key;
       // Short screens may use their whole height; elsewhere a card leaves board above and below.
-      // Every card starts at the same top, so it has only the space below that to fill.
-      fitCard(p, (r) => rowsFor(p.el, span) <= r, short ? room : maxRows, room - topOff, narrow);
+      fitCard(p, (r) => rowsFor(p.el, span) <= r, short ? room : maxRows, room, narrow);
     }
-    const h = p.rows(rowsFor, span);
-    place(p.el, c0, top + Math.max(0, Math.min(topOff, room - h)), span, h); // (never into the footer)
+    heights.set(p, p.rows(rowsFor, span));
+    p.el.hidden = hid;
   }
+  siteEl.hidden = sh;
+  const tallest = Math.max(...heights.values());
+  const topOff = short ? 0 : Math.max(0, Math.floor((room - tallest) / 2));
+  for (const p of pages) if (!p.el.hidden) place(p.el, c0, top + Math.max(0, Math.min(topOff, room - heights.get(p))), span, heights.get(p)); // (never into the footer)
 
-  // The title window sits where the cards sit (same top, same width), so entering the site
-  // turns one window into the next in place.
+  // The title window sits where the cards sit (same top, same width) and is as tall as the
+  // tallest, so entering the site turns one window into the next in place.
   {
     const hid = introEl.hidden;
     introEl.hidden = false;
-    const h = Math.min(room, measure(introEl, span) + 2);
+    const h = Math.min(room, Math.max(measure(introEl, span) + 2, tallest));
     introEl.hidden = hid;
     place(introEl, c0, top + Math.max(0, Math.min(topOff, room - h)), span, h);
   }
@@ -2096,7 +2124,7 @@ $('#apple-toggle').addEventListener('click', playBadApple);
 
 window.addEventListener('keydown', (e) => {
   if (e.altKey || e.ctrlKey || e.metaKey) return;
-  if (e.key === 'd' || e.key === 'D') {
+  if (e.key === 'D' && e.shiftKey) { // (Shift+D: the design panel, for reviewing the palettes)
     options.toggle();
     return;
   }
