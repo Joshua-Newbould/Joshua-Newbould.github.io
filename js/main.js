@@ -4,7 +4,7 @@
 // again. Everything here is built for that: the board (board.js), the background (paint.js),
 // the design system and its variations (design.js), and the transitions below.
 
-import { Board, solid, glyph, source as imageSource, slice } from './board.js';
+import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js';
 import { Paint } from './paint.js';
 import { watchCodes } from './secrets.js';
 import { loadLook, saveLook, scheme as makeScheme, gutter, bgMode, mountOptions, COMBOS, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js';
@@ -172,7 +172,8 @@ const S = {
   brushOn: false, // the paint brush works only while its button is on (off on every visit)
   ascii: false, // ASCII mode (the header's >_ button): the background as coloured characters
   player: null, // Bad Apple!! playing on the board (see badapple.js); 'loading' while it loads
-  small: false, // much smaller switches (in ASCII mode, with the brush on, while Bad Apple plays)
+  small: false, // smaller switches: 'ascii' (half size, two by two to a switch) or 'apple' (Bad Apple)
+  layoutGeom: null, // the normal board's grid: the page is always laid out on it
 };
 
 const SPEED = 0.032; // background time per second: a steady drift
@@ -404,22 +405,26 @@ function resetEdges() {
  */
 function cellTarget(w, h) {
   const base = Math.min(24, Math.max(7.5, Math.sqrt(w * h) / (Math.min(w, h) < 640 ? 70 : 58)));
-  const t = S.lite ? base * 1.3 : base;
-  return S.small ? Math.max(4, t * (S.lite ? 0.55 : 0.4)) : t;
+  return S.lite ? base * 1.3 : base;
 }
 
 function build(first) {
   const cssW = document.documentElement.clientWidth || window.innerWidth;
   const cssH = window.innerHeight;
   const dpr = Math.min(window.devicePixelRatio || 1, S.lite ? 1.5 : 2);
-  const size = `${cssW}x${cssH}@${dpr}${S.lite ? 'L' : ''}${S.small ? 's' : ''}`;
+  const size = `${cssW}x${cssH}@${dpr}${S.lite ? 'L' : ''}${S.small || ''}`;
   if (size === S.size) return;
   S.size = size;
   dropBrush();
   if (!first) cancelWeb(); // a wave's switches belong to the old grid
   board.gapColor = boardGutter();
   shadeBoard();
-  board.configure(Board.metrics(cssW, cssH, dpr, cellTarget(cssW, cssH), 1.9), solid(board.gapColor));
+  // The page is always laid out on the normal grid. ASCII mode splits each of its switches in
+  // two each way (so cards and bars stay exactly where they are); Bad Apple's are smaller still.
+  const normal = Board.metrics(cssW, cssH, dpr, cellTarget(cssW, cssH), 1.9);
+  S.layoutGeom = { ...normal, gap: Math.max(1, Math.round(dpr)) };
+  const m = S.small === 'ascii' ? Board.subdivide(normal, 2) : S.small === 'apple' ? Board.metrics(cssW, cssH, dpr, Math.max(4, cellTarget(cssW, cssH) * (S.lite ? 0.55 : 0.4)), 1.9) : normal;
+  board.configure(m, solid(board.gapColor));
   paint.resize(board);
   S.frame = paint.frame(S.pt, scheme());
   S.lastStep = performance.now();
@@ -429,15 +434,35 @@ function build(first) {
   schedulePrefetch();
 }
 
-/** Small switches are wanted in ASCII mode, with the brush on and while Bad Apple plays. */
-const smallWanted = () => !!(S.ascii || S.brushOn || S.player);
-/** Rebuild the board on small (or normal) switches, if that changes (or `force`): it keeps its colours. */
-function setSmall(small, force = false) {
-  if (small === S.small && !force) return;
-  S.small = small;
-  paint.useCpu = small; // (see paint.frame)
+/** The switches the board wants: Bad Apple's while it plays, half-size in ASCII mode, else normal. */
+const smallWanted = () => (S.player ? 'apple' : S.ascii ? 'ascii' : false);
+/**
+ * Rebuild the board on other switches, if that changes (or `force`). `smooth`: the new switches
+ * start out showing their piece of the board as it was, bare (no gutters), so nothing visibly
+ * changes until a wave turns them over. Returns whether it did that.
+ */
+function setSmall(mode, { force = false, smooth = false } = {}) {
+  if (mode === S.small && !force) return false;
+  let shot = null;
+  if (smooth && board.cells.length) {
+    shot = document.createElement('canvas');
+    shot.width = board.canvas.width;
+    shot.height = board.canvas.height;
+    shot.getContext('2d').drawImage(board.canvas, 0, 0);
+  }
+  S.small = mode;
+  paint.useCpu = !!mode; // (see paint.frame)
   S.size = '';
   build(false);
+  if (!shot) return false;
+  const src = imageSource(shot);
+  const rgb = S.frame.rgb;
+  for (const c of board.cells) {
+    if (!isPaint(c.abs)) continue;
+    board.set(c, slice(src, c.x, c.y, rgbHex(rgb[c.i * 3], rgb[c.i * 3 + 1], rgb[c.i * 3 + 2])));
+    board.setEdges(c, 0);
+  }
+  return true;
 }
 
 /** The section that changes between screens: the visible page card, or the title. */
@@ -512,27 +537,28 @@ function fitBar(el, width, modes) {
 
 function layoutWebBoxes() {
   if (!board.cells.length) return;
+  const G = S.layoutGeom || board; // (the normal grid, whatever size the switches are now)
   // Window-size classes for the CSS (copied into snapshots, which media queries can't see).
   {
-    const w = board.cssW;
-    const h = board.cssH;
+    const w = G.cssW;
+    const h = G.cssH;
     const short = h <= 560 && w > h;
     document.documentElement.dataset.vp = [w < 640 && 'phone', (w >= 1000 || (w >= 800 && short)) && 'wide', short && 'short', touchy.matches && 'touch'].filter(Boolean).join(' ');
   }
-  const dpr = board.dpr;
-  const cw = board.cw / dpr;
-  const ch = board.ch / dpr;
-  const gap = board.gap / dpr;
-  const x0 = board.ox / dpr;
-  const y0 = board.oy / dpr;
-  const rows = board.fullRows;
-  const all = board.cols;
-  const narrow = board.cssW < 640;
+  const dpr = G.dpr;
+  const cw = G.cw / dpr;
+  const ch = G.ch / dpr;
+  const gap = G.gap / dpr;
+  const x0 = G.ox / dpr;
+  const y0 = G.oy / dpr;
+  const rows = G.fullRows;
+  const all = G.cols;
+  const narrow = G.cssW < 640;
   const margin = narrow ? 1 : 2;
   // Cards are a comfortable reading width (up to ~880px) and centred, leaving plenty of board;
   // on phones too there is a band of board either side.
-  const span = Math.min(board.cols - (narrow ? 8 : 2 * margin * 2), Math.ceil(880 / cw));
-  const c0 = Math.floor((board.cols - span) / 2);
+  const span = Math.min(G.cols - (narrow ? 8 : 2 * margin * 2), Math.ceil(880 / cw));
+  const c0 = Math.floor((G.cols - span) / 2);
   const inset = look.chrome !== 'hairline'; // Floating & Frame: header and footer as wide as the content
   const rs = document.documentElement.style;
   rs.setProperty('--cw', `${cw}px`);
@@ -572,7 +598,7 @@ function layoutWebBoxes() {
   const bc = inset ? c0 : 0;
   // Header and footer: the roomiest layout that fits on one line each (short screens keep
   // the nav on the header's row as long as they can, since height is what they lack).
-  const short = board.cssH <= 560 && board.cssW > board.cssH;
+  const short = G.cssH <= 560 && G.cssW > G.cssH;
   fitBar(headerEl(), bw * cw - gap, short ? [[], ['compact'], ['compact', 'tight'], ['stack', 'tight'], ['stack', 'tight', 'abbr']] : [[], ['compact'], ['stack'], ['stack', 'tight'], ['stack', 'tight', 'abbr']]);
   fitBar(footerEl(), bw * cw - gap, [[], ['compact'], ['nocopy'], ['nocopy', 'compact'], ['nocopy', 'compact', 'arrows'], ['nocopy', 'compact', 'arrows', 'tight']]);
   {
@@ -589,8 +615,8 @@ function layoutWebBoxes() {
   const top0 = inset ? 1 : 0;
   place(headerEl(), bc, top0, bw, hh);
   // The full-width footer also covers a part-visible last row; its text stays centred in the visible part.
-  const over = inset ? 0 : board.rows - rows;
-  if (over) footerEl().style.paddingBottom = `${(over * board.ch) / board.dpr - (board.cssH - (board.oy + rows * board.ch) / board.dpr)}px`;
+  const over = inset ? 0 : G.rows - rows;
+  if (over) footerEl().style.paddingBottom = `${(over * G.ch) / G.dpr - (G.cssH - (G.oy + rows * G.ch) / G.dpr)}px`;
   if (inset) place(footerEl(), bc, rows - 1 - fh, bw, fh);
   else place(footerEl(), 0, rows - fh, all, fh + over);
 
@@ -1715,7 +1741,7 @@ function sweepStep(now) {
         c.r = r;
         c.g = g;
         c.b = b;
-        board.flip(c, paintFace(r, g, b), { dur: FLIP_DUR, gap: sw.gapTo });
+        board.flip(c, paintFace(r, g, b), { dur: FLIP_DUR, gap: sw.gapTo, edgesIn: (c.ca ?? 1) < 1 ? 40 : 0 });
         // Now that it shows the current colour, leave it a random way towards its next drift
         // flip (as in steady drift), so they don't all come due again together.
         staggerMemory(c, k);
@@ -1725,6 +1751,7 @@ function sweepStep(now) {
       // flip starts (one still waiting is dropped, one in motion is hurried to land in time), so
       // every switch is free to turn over the moment the front arrives.
       const toFront = sw.tau[i] + SWEEP_BAND / 2 - el;
+      if (sw.hold) continue; // (showing the old board's picture until the front)
       if (x > 0 || toFront < SWEEP_FREEZE * board.durScale) {
         if (!sw.frozen[i]) {
           sw.frozen[i] = 1;
@@ -1822,18 +1849,29 @@ function restoreBrushBoxes(force = false) {
 /** Colours a brushed switch flicks through: one held for a moment, then a couple more. */
 function brushPath() {
   const pal = scheme().brush;
-  // (In ASCII mode the brush leaves bold characters in its colours.)
-  const face = (hex) => (S.ascii ? Object.assign(glyph(pick('#@%*'), hex, ASCII_FACE, 600), { avg: hex }) : solid(hex));
-  const c = () => face(pick(pal));
+  // The brush leaves bold characters in its colours: on ASCII mode's small switches one each,
+  // on normal ones a switch turns into a little grid of smaller ones.
+  const c = () => (S.small === 'ascii' ? Object.assign(glyph(pick('#@%*'), pick(pal), ASCII_FACE, 600), { avg: pal[0] }) : brushMosaic(pal));
   return [c(), { f: c(), w: 220 + rand() * 260 }, ...Array.from({ length: randInt(1, 3) }, c)];
+}
+
+const mosaics = new Map(); // brush palette -> a few ready-made little grids (each drawn once)
+function brushMosaic(pal) {
+  const key = pal.join();
+  let pool = mosaics.get(key);
+  if (!pool) {
+    pool = Array.from({ length: 12 }, (_, n) => Object.assign(mosaic(Array.from({ length: 4 }, () => ({ ch: pick('#@%*+='), fg: pick(pal) })), 2, 2, ASCII_FACE, `${key}|${n}`), { avg: pal[n % pal.length] }));
+    mosaics.set(key, pool);
+  }
+  return pick(pool);
 }
 
 function splash(i, again = false) {
   const col = i % board.cols;
   const row = (i / board.cols) | 0;
   const now = performance.now();
-  // (About as wide a stroke on small switches as on normal ones.)
-  const R = S.small ? 3 : 1;
+  // (One switch at a time on the normal board; on ASCII mode's half-size ones, a small patch.)
+  const R = S.small === 'ascii' ? 1 : 0;
   for (let dr = -R; dr <= R; dr++) {
     for (let dc = -R; dc <= R; dc++) {
       const far = Math.abs(dr) + Math.abs(dc);
@@ -1845,7 +1883,7 @@ function splash(i, again = false) {
       const s = board.cells[j];
       if (now - s.splash < 200 || (again && board.busy(s))) continue;
       s.splash = now;
-      const delay = (far * 25) / R;
+      const delay = R ? (far * 25) / R : 0;
       const box = boxAtCell(j);
       if (box) {
         brushBox(box, () => board.flip(s, concrete(s.abs, s.i), { delay: delay + 50, steps: brushPath(), stepDur: 85, dur: 190, edgesIn: 50, edgesOut: 110 }));
@@ -2037,7 +2075,6 @@ brushToggle.addEventListener('click', () => {
   brushToggle.setAttribute('aria-pressed', String(S.brushOn));
   document.documentElement.classList.toggle('brush-on', S.brushOn);
   if (!S.brushOn) dropBrush();
-  setSmall(smallWanted()); // (the brush paints on small switches)
 });
 
 const options = mountOptions(look, onLookChange);
@@ -2138,8 +2175,9 @@ function switchCards() {
 function toggleAscii() {
   if (pendingApply || goingTo || S.overlay || S.sweep) return void setTimeout(toggleAscii, 250); // (once the running transition is done)
   const on = !S.ascii;
-  // The board takes its new switch size first (keeping its colours), then ripples into the new look.
-  setSmall(on || S.brushOn || !!S.player);
+  // The new switches start out showing the board as it was; the ripple turns them over into the
+  // new look (and size).
+  const held = setSmall(S.player ? 'apple' : on ? 'ascii' : false, { smooth: true });
   const sweepFrom = scheme();
   const gapFrom = board.gapColor;
   const fromFrame = S.frame;
@@ -2149,6 +2187,7 @@ function toggleAscii() {
   if (reduce.matches) return settleBackground();
   startSweep(sweepFrom, motionField('ripple'), -SWEEP_BAND / 2, gapFrom, fromFrame);
   S.sweep.asciiOld.fill(S.ascii ? 0 : 1); // (ahead of the front, switches keep the old look)
+  S.sweep.hold = held; // (and hold the old board's picture until it arrives)
 }
 
 /**
@@ -2173,7 +2212,7 @@ async function playBadApple() {
   dropBrush();
   restoreBrushBoxes(true);
   document.documentElement.classList.add('playing');
-  setSmall(true, true);
+  setSmall('apple', { force: true });
   S.player = new Player(board, frames, { dark: solid('#0b0d10'), light: solid('#eef1f5'), rippleMs: WAVE_MS, onEnd: stopBadApple });
   addEventListener('keydown', playerKeys, true);
   addEventListener('pointerdown', stopBadApple, true);
@@ -2194,7 +2233,7 @@ function stopBadApple(e) {
   removeEventListener('pointerdown', stopBadApple, true);
   S.player.release();
   S.player = null;
-  setSmall(smallWanted(), true);
+  setSmall(smallWanted(), { force: true });
   // The page comes back the way it first arrives: switching in from the background.
   webGo(() => {}, { fromNothing: true });
   document.documentElement.classList.remove('playing');

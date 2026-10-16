@@ -45,17 +45,24 @@ export function slice(src, sx, sy, bg = null) {
   return { t: 'slice', src, sx, sy, bg, key: 's' + src.id + ':' + sx + ':' + sy + (bg || '') };
 }
 
+/** A flap showing a little grid of smaller flaps, each with a character (`tiles`: nx·ny of
+ *  { ch, fg }, row by row) on `bg`: where the brush has been. Make few of these and reuse them:
+ *  each one's picture is drawn once and kept. */
+export function mosaic(tiles, nx, ny, bg, key) {
+  return { t: 'mosaic', tiles, nx, ny, bg, key: 'm' + key, gk: 'M' + key };
+}
+
 /** A one-off solid flap (paint and photo cells). Not cached: these colours are unbounded. */
 export function solid(bg) {
   return { t: 'blank', bg, key: 'b' + bg };
 }
 
 /** Pick an integer cell size near `target` that wastes the fewest pixels of `total`. */
-function bestFit(total, target) {
-  let best = Math.round(target);
+function bestFit(total, target, step = 1) {
+  let best = Math.max(step, Math.round(target / step) * step);
   let bestScore = Infinity;
   for (let k = Math.floor(target * 0.95); k <= Math.ceil(target * 1.05); k++) {
-    if (k < 4) continue;
+    if (k < 4 || k % step) continue;
     // Leftover pixels only become a thin centred border, so stay close to the target.
     const score = ((total % k) / k) * 0.6 + (Math.abs(k - target) / target) * 10;
     if (score < bestScore) { bestScore = score; best = k; }
@@ -109,12 +116,18 @@ export class Board {
   static metrics(cssW, cssH, dpr, targetCw, ratio) {
     const W = Math.round(cssW * dpr);
     const H = Math.round(cssH * dpr);
-    const cw = bestFit(W, targetCw * dpr);
-    const ch = bestFit(H, cw * ratio);
+    // (Even sizes, so a board of half-size switches lines up with this one exactly: see subdivide.)
+    const cw = bestFit(W, targetCw * dpr, 2);
+    const ch = bestFit(H, cw * ratio, 2);
     const cols = Math.ceil(W / cw);
     const rows = Math.ceil(H / ch);
     const fullRows = Math.floor(H / ch);
     return { cssW, cssH, dpr, W, H, cw, ch, cols, rows, fullRows, ox: -Math.floor((cols * cw - W) / 2), oy: 0 };
+  }
+
+  /** The same board with each switch split into k × k smaller ones, on exactly the same lines. */
+  static subdivide(m, k) {
+    return { ...m, cw: m.cw / k, ch: m.ch / k, cols: m.cols * k, rows: m.rows * k, fullRows: m.fullRows * k };
   }
 
   configure(m, fill) {
@@ -190,6 +203,32 @@ export class Board {
     c.width = gm.fw;
     c.height = gm.fh;
     const x = c.getContext('2d');
+    if (f.t === 'mosaic') {
+      // Little flaps: each a character centred on its own hinge, with fine gutters between.
+      const { fw, fh } = gm;
+      for (let j = 0; j < f.ny; j++) {
+        for (let i = 0; i < f.nx; i++) {
+          const x0 = Math.round((i * fw) / f.nx);
+          const y0 = Math.round((j * fh) / f.ny);
+          const w = Math.round(((i + 1) * fw) / f.nx) - x0;
+          const h = Math.round(((j + 1) * fh) / f.ny) - y0;
+          const t = f.tiles[j * f.nx + i];
+          const px = Math.round(Math.min(w * 1.45, h * 0.66));
+          x.font = `600 ${px}px ${MONO}`;
+          x.fillStyle = t.fg;
+          x.textAlign = 'center';
+          x.textBaseline = 'alphabetic';
+          x.fillText(t.ch, x0 + w / 2, y0 + Math.round(h / 2) + Math.round(px * 0.35));
+          x.fillStyle = 'rgba(0,0,0,0.6)';
+          if (i) x.fillRect(x0, y0, 1, h);
+          if (j) x.fillRect(x0, y0, w, 1);
+          x.fillStyle = 'rgba(0,0,0,0.3)';
+          x.fillRect(x0, y0 + Math.round(h / 2), w, 1); // (the hinge)
+        }
+      }
+      this.glyphCache.set(id, c);
+      return c;
+    }
     if (f.t === 'tri') {
       const { fw, fh } = gm;
       const corners = { 1: [[fw, 0], [fw, fh], [0, fh]], 2: [[0, 0], [fw, fh], [0, fh]], 3: [[0, 0], [fw, 0], [fw, fh]], 4: [[0, 0], [fw, 0], [0, fh]] }[f.code];
@@ -216,7 +255,7 @@ export class Board {
     const ctx = this.ctx;
     ctx.fillStyle = f.bg;
     ctx.fillRect(x, dy, gm.fw, dh);
-    if (f.t === 'glyph' || f.t === 'tri') ctx.drawImage(this.glyphCanvas(f, gm), 0, py, gm.fw, ph, x, dy, gm.fw, dh);
+    if (f.t === 'glyph' || f.t === 'tri' || f.t === 'mosaic') ctx.drawImage(this.glyphCanvas(f, gm), 0, py, gm.fw, ph, x, dy, gm.fw, dh);
     else if (f.t === 'slice') ctx.drawImage(f.src.canvas, f.sx, f.sy + py, gm.fw, ph, x, dy, gm.fw, dh);
   }
 
@@ -245,7 +284,7 @@ export class Board {
       ctx.fillStyle = f.bg || this.gapColor;
       ctx.fillRect(x, y, w, h);
       if (f.t === 'slice') ctx.drawImage(f.src.canvas, f.sx, f.sy, w, h, x, y, w, h);
-      else if (f.t === 'glyph' || f.t === 'tri') ctx.drawImage(this.glyphCanvas(f, gm), x, y);
+      else if (f.t === 'glyph' || f.t === 'tri' || f.t === 'mosaic') ctx.drawImage(this.glyphCanvas(f, gm), x, y);
       if (ca > 0) {
         ctx.globalAlpha = ca;
         ctx.drawImage(this.chrome(s.gap || this.gapColor), x, y);
