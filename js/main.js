@@ -965,9 +965,15 @@ function schedulePrefetch() {
   clearTimeout(prefetchTimer);
   prefetchTimer = setTimeout(() => (window.requestIdleCallback || setTimeout)(prefetchShots), 350);
 }
+let prefetchedFor = '';
 async function prefetchShots() {
   const busy = () => S.overlay || S.brush || goingTo || brushBoxes.size;
   if (busy()) return;
+  // (Nothing that goes into the pictures has changed since the last full run: all are cached.
+  // Each job re-lays the page out just to look its pictures up, so don't.)
+  const pg0 = pages[pageIndex(S.key)];
+  const sig = [S.key, pg0?.part, S.dark, S.ascii, S.size, look.palette, ...pages.map((p) => comboOf(p.id)), comboOf('intro')].join('|');
+  if (sig === prefetchedFor) return;
   // Briefly lay a hidden box out (invisibly), copy it, and put everything back — all synchronous.
   const withShown = (el, fn) => {
     const state = [el.hidden, siteEl.hidden, headerEl().style.visibility, footerEl().style.visibility];
@@ -1046,10 +1052,15 @@ async function prefetchShots() {
   for (const pg of pages) jobs.push(() => (pg.el.hidden ? inColours(pg.id, () => withShown(pg.el, () => snapshot(pg.el))) : null));
   for (const pg of pages) jobs.push(() => [asOn(pg.id, headerEl()), asOn(pg.id, footerEl())]);
   jobs.push(() => (introEl.hidden ? inColours('intro', () => withShown(introEl, () => snapshot(introEl))) : null));
+  // One job per idle moment: a job whose pictures are all cached finishes without ever waiting,
+  // and a run of them in one go is a long task just as a wave settles (or a click arrives).
+  const idle = () => new Promise((r) => (window.requestIdleCallback ? requestIdleCallback(r, { timeout: 1000 }) : setTimeout(r, 16)));
   for (const job of jobs) {
+    await idle();
     if (busy()) return;
     await Promise.all([].concat(job()));
   }
+  if (!busy()) prefetchedFor = sig;
 }
 
 const visibleBoxes = () => (S.key === 'intro' ? [introEl] : [headerEl(), morphBox(), footerEl()]).filter((el) => el && !el.closest('[hidden]'));
@@ -1068,6 +1079,10 @@ const visibleBoxes = () => (S.key === 'intro' ? [introEl] : [headerEl(), morphBo
 // Every wave (page, part or theme) crosses the whole screen in the same time, whatever the
 // screen's size, and every switch in it flips at the same pace: one blend step, then the flip.
 const WAVE_MS = 1000;
+// How long before a switch falls its edges fade in (and the background's sweep is timed to it).
+// Short, so a click is answered at once; the wave's own pace is set by WAVE_MS.
+const PAGE_AHEAD = 55;
+const THEME_AHEAD = 40;
 const FLIP_STEP = 110;
 const FLIP_DUR = 200;
 
@@ -1134,7 +1149,10 @@ const setMask = (el, m) => {
 };
 function setShadowRect(layer, box) {
   const r = box.getBoundingClientRect();
-  Object.assign(layer.style, { left: r.left - PAD + 'px', top: r.top - PAD + 'px', width: r.width + 2 * PAD + 'px', height: r.height + 2 * PAD + 'px' });
+  // (Kept, so a wave's frames needn't ask the page where the layer is: that would make each frame
+  // wait for the page's styles, all of which change at once with the theme.)
+  layer.rect = { left: r.left - PAD, top: r.top - PAD, width: r.width + 2 * PAD, height: r.height + 2 * PAD };
+  Object.assign(layer.style, { left: layer.rect.left + 'px', top: layer.rect.top + 'px', width: layer.rect.width + 'px', height: layer.rect.height + 'px' });
 }
 /** The shadow at rest: under the visible card, or none. */
 function placeShadow(box) {
@@ -1165,8 +1183,8 @@ function shadowWave(field, oldBox, newBox, hideLag, showLag, span) {
   const frame = (now) => {
     if (run !== shadowRun) return;
     const t = now - t0;
-    if (oldOn) setMask(oldL, field.edge(oldL.getBoundingClientRect(), t - hideLag, 'transparent', '#000', -soft));
-    if (hasShadow(newBox)) setMask(newL, field.edge(newL.getBoundingClientRect(), t - showLag, '#000', 'transparent', soft));
+    if (oldOn) setMask(oldL, field.edge(oldL.rect || oldL.getBoundingClientRect(), t - hideLag, 'transparent', '#000', -soft));
+    if (hasShadow(newBox)) setMask(newL, field.edge(newL.rect || newL.getBoundingClientRect(), t - showLag, '#000', 'transparent', soft));
     if (t - showLag > span + 200) {
       oldL.style.opacity = '0';
       setMask(oldL, '');
@@ -1230,6 +1248,7 @@ function veilCanvases(shots, hole) {
       g.fill();
     }
     Object.assign(c.style, { left: shot.rect.left + 'px', top: shot.rect.top + 'px', width: shot.rect.width + 'px', height: shot.rect.height + 'px' });
+    c.rect = shot.rect; // (where it is, without asking the page each frame)
     out.push(c);
   }
   return out;
@@ -1251,7 +1270,7 @@ function veilWipe(field, lag, span) {
   const frame = (now) => {
     if (run !== veilRun) return;
     const t = now - t0 - lag;
-    for (const c of themeVeil.children) setVeilMask(c, field.edge(c.getBoundingClientRect(), t, 'transparent', '#000', 110));
+    for (const c of themeVeil.children) setVeilMask(c, field.edge(c.rect || c.getBoundingClientRect(), t, 'transparent', '#000', 110));
     if (t > span + 300) return clearThemeVeil();
     requestAnimationFrame(frame);
   };
@@ -1369,7 +1388,7 @@ const webGo = safely(async function webGo(go, { dir = 1, toKey = null, fromNothi
   const gapFrom = board.gapColor;
   const fromFrame = S.frame;
   apply();
-  if (!samePage) startSweep(sweepFrom, motionField(look.motion, dir, origin), 100 - SWEEP_BAND / 2, gapFrom, fromFrame); // (half-way through its blend as the cards flip)
+  if (!samePage) startSweep(sweepFrom, motionField(look.motion, dir, origin), PAGE_AHEAD - SWEEP_BAND / 2, gapFrom, fromFrame); // (half-way through its blend as the cards flip)
   const boxes = waveBoxes(S.key, fromNothing ? null : fromKey);
   for (const el of boxes) el.style.opacity = '0';
   layoutWeb();
@@ -1382,7 +1401,7 @@ const webGo = safely(async function webGo(go, { dir = 1, toKey = null, fromNothi
   });
 
   const field = motionField(look.motion, dir, origin);
-  const ahead = 100; // edges fade in over this long, reaching full strength as the switch flips
+  const ahead = PAGE_AHEAD; // edges fade in over this long, reaching full strength as the switch flips
   const STEP = FLIP_STEP;
   const DUR = FLIP_DUR;
   let span = 0;
@@ -1620,7 +1639,7 @@ const switchTheme = safely(async function switchTheme(dark, preShots = null, fro
   const gapFrom = board.gapColor;
   const fromFrame = S.frame;
   applyTheme(dark);
-  startSweep(sweepFrom, motionField('ripple', 1, origin), 70 - SWEEP_BAND / 2, gapFrom, fromFrame); // the background ripples into the new theme
+  startSweep(sweepFrom, motionField('ripple', 1, origin), THEME_AHEAD - SWEEP_BAND / 2, gapFrom, fromFrame); // the background ripples into the new theme
   syncDom();
 
   const BLENDS = [0.5];
@@ -1653,7 +1672,7 @@ const switchTheme = safely(async function switchTheme(dark, preShots = null, fro
     }
   }
   const field = motionField('ripple', 1, origin);
-  const ahead = 70; // the switch has already answered; the ripple follows straight away
+  const ahead = THEME_AHEAD; // the switch has already answered; the ripple follows straight away
   veilWipe(field, ahead + 30 + FLIP_STEP + FLIP_DUR / 2, WAVE_MS); // the front sits where switches are half-way through
   let end = 0;
   retarget(
