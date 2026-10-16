@@ -19,7 +19,7 @@
   button, a.btn { flex: 1; font: inherit; font-size: 14px; text-align: center; padding: 11px 6px; border-radius: 8px; background: #222; color: #ddd; text-decoration: none; border: 1px solid #444; }
   #run { background: #fff; color: #000; font-weight: 700; border-color: #fff; }
   #run:disabled { opacity: .4; }
-  .seg { display: flex; flex: 1.4; border: 1px solid #444; border-radius: 8px; overflow: hidden; }
+  .seg { display: flex; flex: 1.4; min-width: 0; border: 1px solid #444; border-radius: 8px; overflow: hidden; }
   .seg a { flex: 1; text-align: center; padding: 11px 4px; color: #aaa; text-decoration: none; background: #181818; }
   .seg a.on { background: #ddd; color: #000; font-weight: 700; }
 </style>
@@ -30,7 +30,10 @@
   <table id="res"></table>
   <div class="row">
     <button id="run">Run test</button>
-    <div class="seg"><a id="m-gl" href="?mode=gl">GPU</a><a id="m-2d" href="?mode=2d">2D</a></div>
+    <div class="seg"><a id="m-gl">GPU</a><a id="m-2d">2D</a></div>
+  </div>
+  <div class="row">
+    <div class="seg"><a id="c-on">Capped (screen rate)</a><a id="c-off">Uncapped (max)</a></div>
   </div>
 </div>
 <script type="module" src="bench.js"></script>

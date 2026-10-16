@@ -7,7 +7,16 @@ import { GLBoard } from './glboard.js';
 
 const qs = new URLSearchParams(location.search);
 const mode = qs.get('mode') === '2d' ? '2d' : 'gl';
-document.getElementById('m-' + mode).classList.add('on');
+// Uncapped: each screen refresh renders as many whole frames as fit (each made to finish on the
+// GPU, or the 2D canvas), so the fps is what the renderer could do, not the screen's rate.
+const uncap = qs.get('uncap') === '1';
+for (const [id, k, v] of [['m-gl', 'mode', 'gl'], ['m-2d', 'mode', '2d'], ['c-on', 'uncap', '0'], ['c-off', 'uncap', '1']]) {
+  const p = new URLSearchParams(location.search);
+  p.set(k, v);
+  const a = document.getElementById(id);
+  a.href = '?' + p;
+  if ((k === 'mode' ? mode : uncap ? '1' : '0') === v) a.classList.add('on');
+}
 const $ = (id) => document.getElementById(id);
 
 const cssW = document.documentElement.clientWidth || innerWidth;
@@ -26,11 +35,16 @@ if (mode === 'gl') {
   if (!board) note ||= 'No WebGL2 here: showing 2D.';
 }
 const isGL = !!board;
-if (!board) board = new Board(canvas);
+if (!board) {
+  // (Uncapped, the 2D canvas is read back every frame: browsers then draw it on the CPU anyway,
+  // Chrome only after a long stall, so it starts that way here and is labelled so.)
+  if (uncap) canvas.getContext('2d', { alpha: false, willReadFrequently: true });
+  board = new Board(canvas);
+}
 board.flap = 'crisp';
 board.setShade('#1a1030', 1);
 board.configure(normal, solid('#0a0b10'));
-$('info').textContent = `${isGL ? 'GPU' : '2D'} renderer · ${normal.cols * normal.rows} switches, ${ascii.cols * ascii.rows} in ASCII · ${cssW}×${cssH} @${dpr}` + (note ? ' · ' + note : '');
+$('info').textContent = `${isGL ? 'GPU' : uncap ? '2D (CPU-drawn)' : '2D'} renderer${uncap ? ', uncapped' : ''} · ${normal.cols * normal.rows} switches, ${ascii.cols * ascii.rows} in ASCII · ${cssW}×${cssH} @${dpr}` + (note ? ' · ' + note : '');
 
 // (The prototype keeps a few textures for snapshot pictures: free the ones no longer shown.)
 function freeSources(keep) {
@@ -151,10 +165,20 @@ function stats(gaps, js) {
   return { fps, bad: gaps.filter((g) => g > 34).length, worst: gaps.length ? Math.max(...gaps) : 0, js: js.reduce((a, b) => a + b, 0) / (js.length || 1), n };
 }
 
-function frame(now) {
-  const a = performance.now();
+let lastStep = 0;
+const px = new Uint8Array(4);
+/** Make the frame just drawn actually finish (the GPU's work, or the 2D canvas's raster). */
+function finishFrame() {
+  if (isGL) board.gl.readPixels(0, 0, 1, 1, board.gl.RGBA, board.gl.UNSIGNED_BYTE, px);
+  else board.ctx.getImageData(0, 0, 1, 1);
+}
+function step(now) {
+  // (Drift at the same rate per second however many frames are drawn.)
+  const dt = lastStep ? Math.min(100, now - lastStep) : 16.7;
+  lastStep = now;
+  const pDrift = 0.006 * (dt / 16.7);
   if (drift) {
-    for (const c of board.cells) if (!c.anim && !c.q.length && rnd() < 0.006) board.flip(c, card && inCard(c) && c.cur.t === 'slice' ? c.cur : faceAt(c, now), { dur: FLIP });
+    for (const c of board.cells) if (!c.anim && !c.q.length && rnd() < pDrift) board.flip(c, card && inCard(c) && c.cur.t === 'slice' ? c.cur : faceAt(c, now), { dur: FLIP });
   }
   if (run) {
     const ph = PHASES[run.k];
@@ -168,13 +192,32 @@ function frame(now) {
   }
   board.tick(now);
   if (isGL) board.render(now);
-  if (run && last) { run.gaps.push(now - last); run.js.push(performance.now() - a); }
-  last = now;
+}
+function frame(now) {
+  if (!uncap) {
+    const a = performance.now();
+    step(now);
+    if (run && last) { run.gaps.push(now - last); run.js.push(performance.now() - a); }
+    last = now;
+  } else {
+    // As many whole frames as fit in this refresh; each one's time is its own frame time.
+    const start = performance.now();
+    if (run && last && start - last > 50) run.gaps.push(start - last); // (a stall between refreshes)
+    let t = start;
+    do {
+      step(t);
+      finishFrame();
+      const e = performance.now();
+      if (run) { run.gaps.push(e - t); run.js.push(e - t); }
+      t = e;
+    } while (t - start < 13);
+    last = t;
+  }
   requestAnimationFrame(frame);
 }
 
-const KEY = 'flapbench:' + mode;
-function load(m) { try { return JSON.parse(localStorage.getItem('flapbench:' + m)); } catch { return null; } }
+const KEY = 'flapbench:' + mode + (uncap ? ':uncapped' : '');
+function load(m) { try { return JSON.parse(localStorage.getItem('flapbench:' + m + (uncap ? ':uncapped' : ''))); } catch { return null; } }
 function finish() {
   const all = run.rows.map((r) => r[1]);
   const total = { fps: all.reduce((a, s) => a + s.fps * s.n, 0) / all.reduce((a, s) => a + s.n, 0), bad: all.reduce((a, s) => a + s.bad, 0), worst: Math.max(...all.map((s) => s.worst)), js: all.reduce((a, s) => a + s.js, 0) / all.length };
@@ -192,13 +235,14 @@ function show() {
   if (!g && !d) { $('res').innerHTML = ''; return; }
   const names = (g || d).rows.map((r) => r[0]).concat(['Whole test']);
   const cell = (s) => (!s ? '<td>–</td>' : `<td class="${tone(s)}">${s.fps.toFixed(0)} fps · ${s.bad}</td>`);
-  let h = '<tr><th>fps · stutters</th><th>GPU</th><th>2D</th></tr>';
+  let h = `<tr><th>${uncap ? 'max fps' : 'fps'} · stutters</th><th>GPU</th><th>2D</th></tr>`;
   names.forEach((n, k) => {
     const at = (r) => r && (k < r.rows.length ? r.rows[k][1] : r.total);
     h += `<tr${k === names.length - 1 ? ' style="font-weight:700"' : ''}><td>${n}</td>${cell(at(g))}${cell(at(d))}</tr>`;
   });
   const worst = (r) => (r ? r.total.worst.toFixed(0) + ' ms' : '–');
   h += `<tr><td>Worst frame</td><td>${worst(g)}</td><td>${worst(d)}</td></tr>`;
+  if (uncap) h += '<tr><td colspan=3 style="color:#aaa;white-space:normal">Uncapped: the most frames each renderer can finish per second. 2D is drawn on the CPU here, so compare 2D in Capped mode.</td></tr>';
   if (g && !g.isGL) h += '<tr><td colspan=3 style="color:#aaa">(the GPU column ran on 2D: no WebGL2)</td></tr>';
   $('res').innerHTML = h;
 }
