@@ -8,7 +8,6 @@ import { Board, solid, glyph, mosaic, source as imageSource, slice } from './boa
 import { GLBoard } from './glboard.js';
 import { Paint } from './paint.js';
 import { watchCodes } from './secrets.js';
-import { FlapSound } from './sound.js';
 import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, bgMode, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
@@ -2218,17 +2217,8 @@ watchCodes({ konami: playBadApple });
 for (const btn of $$('.ascii-btn')) btn.addEventListener('click', toggleAscii);
 $('#apple-toggle').addEventListener('click', playBadApple);
 
-// The flaps' sound: off unless asked for (M), and only ever started by a key or a tap.
-const sound = new FlapSound({ variant: 'snap', volume: 0.35 });
-addEventListener('pointerdown', () => sound.gesture(), true);
-addEventListener('keydown', () => sound.gesture(), true);
-
 window.addEventListener('keydown', (e) => {
   if (e.altKey || e.ctrlKey || e.metaKey) return;
-  if ((e.key === 'm' || e.key === 'M') && !e.repeat && !e.target.closest?.('input, textarea, select, [contenteditable]')) {
-    sound.toggle();
-    return;
-  }
   if (e.key === 'D' && e.shiftKey) { // (Shift+D: the design panel, for reviewing the palettes)
     options.toggle();
     return;
@@ -2433,10 +2423,6 @@ function loop(now) {
   }
   board.tick(now);
   board.render(now);
-  if (board.landed) {
-    sound.land(board.landed, (board.landX / board.landed / board.W) * 2 - 1);
-    board.landed = board.landX = 0;
-  }
   requestAnimationFrame(loop);
 }
 

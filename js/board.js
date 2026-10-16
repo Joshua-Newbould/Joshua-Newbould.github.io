@@ -742,9 +742,6 @@ export class Board {
         s.cur = done.to;
         s.anim = null;
         changed = true;
-        // (Counted for the sound: how many landed this frame, and where.)
-        this.landed = (this.landed || 0) + 1;
-        this.landX = (this.landX || 0) + s.x;
         if (s.q.length) s.at = Math.max(s.at, now + s.q[0].w);
         if (done.then) {
           done.then();
