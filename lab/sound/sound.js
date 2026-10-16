@@ -42,7 +42,7 @@ const SPRITE = { file: '../assets/sound/pragotron-ticks.mp3', count: 20, lead: 0
  */
 const DENSITY = {
   knee: 1e9, exp: 0.45, cmax: 70, ref: 10, fall: 0.35, cluster: 0, clusterMs: [2, 7], clusterDb: [-8, -3],
-  spread: 14, skew: 1.3, makeup: 4, rateJit: 0.035, maxVoices: 160, perFrame: 6, landDb: 2,
+  spread: 14, skew: 1.3, makeup: 4, rateJit: 0.035, maxVoices: 160, perFrame: 16, landDb: 2,
 };
 // `length`: every tick drawn out this many times longer, at the same pitch (its click kept as it
 // is, its ring and decay stretched); `pitch`: semitones up or down, at the same length.
