@@ -45,11 +45,12 @@ export function slice(src, sx, sy, bg = null) {
   return { t: 'slice', src, sx, sy, bg, key: 's' + src.id + ':' + sx + ':' + sy + (bg || '') };
 }
 
-/** A flap showing a little grid of smaller flaps, each with a character (`tiles`: nx·ny of
- *  { ch, fg }, or { fill } for a piece in a plain colour, row by row) on `bg`: where the brush
- *  has been. Each one's picture is drawn once and kept (by `key`). */
-export function mosaic(tiles, nx, ny, bg, key) {
-  return { t: 'mosaic', tiles, nx, ny, bg, key: 'm' + key, gk: 'M' + key };
+/** A flap the brush has been over: a little grid of smaller flaps (`tiles`: nx·ny, row by row),
+ *  each { ch, fg } a character on `bg` with gutters in `gap`, or null where the brush hasn't
+ *  reached, which shows `base` (what the switch showed: a colour, or a piece of a card with its
+ *  text). The brushed pieces' picture is drawn once and kept (by `key`); `base` is drawn under it. */
+export function mosaic(tiles, nx, ny, bg, gap, key, base = null) {
+  return { t: 'mosaic', tiles, nx, ny, bg: base ? base.bg : bg, ink: bg, gap, base, key: 'm' + key + (base ? base.key : ''), gk: 'M' + key };
 }
 
 /** A one-off solid flap (paint and photo cells). Not cached: these colours are unbounded. */
@@ -213,21 +214,21 @@ export class Board {
           const w = Math.round(((i + 1) * fw) / f.nx) - x0;
           const h = Math.round(((j + 1) * fh) / f.ny) - y0;
           const t = f.tiles[j * f.nx + i];
-          if (t.fill) {
-            // (A piece the brush hasn't reached: the switch's own colour.)
-            x.fillStyle = t.fill;
-            x.fillRect(x0, y0, w, h);
-            continue;
-          }
+          if (!t) continue; // (a piece the brush hasn't reached: what is under it shows)
+          x.fillStyle = f.ink;
+          x.fillRect(x0, y0, w, h);
           const px = Math.round(Math.min(w * 1.45, h * 0.66));
           x.font = `600 ${px}px ${MONO}`;
           x.fillStyle = t.fg;
           x.textAlign = 'center';
           x.textBaseline = 'alphabetic';
           x.fillText(t.ch, x0 + w / 2, y0 + Math.round(h / 2) + Math.round(px * 0.35));
-          x.fillStyle = 'rgba(0,0,0,0.6)';
+          // Gutters the colour of the ones around (the board's, or a section's surface).
+          x.fillStyle = f.gap;
           if (i) x.fillRect(x0, y0, 1, h);
           if (j) x.fillRect(x0, y0, w, 1);
+          if (i < f.nx - 1) x.fillRect(x0 + w - 1, y0, 1, h);
+          if (j < f.ny - 1) x.fillRect(x0, y0 + h - 1, w, 1);
           x.fillStyle = 'rgba(0,0,0,0.3)';
           x.fillRect(x0, y0 + Math.round(h / 2), w, 1); // (the hinge)
         }
@@ -259,6 +260,11 @@ export class Board {
   drawPart(f, gm, x, py, ph, dy, dh) {
     if (dh < 0.5 || ph <= 0) return;
     const ctx = this.ctx;
+    if (f.t === 'mosaic' && f.base) {
+      this.drawPart(f.base, gm, x, py, ph, dy, dh);
+      ctx.drawImage(this.glyphCanvas(f, gm), 0, py, gm.fw, ph, x, dy, gm.fw, dh);
+      return;
+    }
     ctx.fillStyle = f.bg;
     ctx.fillRect(x, dy, gm.fw, dh);
     if (f.t === 'glyph' || f.t === 'tri' || f.t === 'mosaic') ctx.drawImage(this.glyphCanvas(f, gm), 0, py, gm.fw, ph, x, dy, gm.fw, dh);
@@ -276,7 +282,9 @@ export class Board {
     if (!a && ca < 1) {
       // A "bare" flap: its face covers the whole cell, edges faded in by `ca`, so a grid of
       // bare flaps showing slices of a picture is that picture, seamless.
-      const f = s.cur;
+      // (A brushed flap shows what was under it, with the brush's picture on top.)
+      const over = s.cur.t === 'mosaic' && s.cur.base ? s.cur : null;
+      const f = over ? over.base : s.cur;
       // Only the part of the cell the picture covers takes its colour; beyond a card's right or
       // bottom edge the gutter shows, exactly as around the real card.
       let w = this.cw;
@@ -291,6 +299,7 @@ export class Board {
       ctx.fillRect(x, y, w, h);
       if (f.t === 'slice') ctx.drawImage(f.src.canvas, f.sx, f.sy, w, h, x, y, w, h);
       else if (f.t === 'glyph' || f.t === 'tri' || f.t === 'mosaic') ctx.drawImage(this.glyphCanvas(f, gm), x, y);
+      if (over) ctx.drawImage(this.glyphCanvas(over, gm), x, y);
       if (ca > 0) {
         ctx.globalAlpha = ca;
         ctx.drawImage(this.chrome(s.gap || this.gapColor), x, y);

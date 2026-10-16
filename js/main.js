@@ -1857,33 +1857,29 @@ function restoreBrushBoxes(force = false) {
 /**
  * The faces a brushed switch passes through before it goes back: bold characters in the brush's
  * colours. On ASCII mode's small switches, one each; on normal ones the switch splits into a
- * little grid of four smaller ones, the pieces the brush covers (`mask`) with characters and the
- * rest in the switch's own colour, so a stroke's edge is softer.
+ * little grid of four smaller ones: the pieces the brush covers (`mask`) get characters, the rest
+ * go on showing what the switch showed (its colour, or a section's text), so a stroke's edge is
+ * softer. Their gutters match what they are over (`gap`).
  */
-function brushPath(s, mask) {
+function brushPath(s, mask, gap) {
   const pal = scheme().brush;
-  const base = faceColour(concrete(s.abs, s.i));
-  const c = () => (S.small === 'ascii' ? Object.assign(glyph(pick('#@%*'), pick(pal), ASCII_FACE, 600), { avg: pal[0] }) : brushMosaic(pal, mask, base));
+  const base = concrete(s.abs, s.i);
+  const c = () => (S.small === 'ascii' ? Object.assign(glyph(pick('#@%*'), pick(pal), ASCII_FACE, 600), { avg: pal[0] }) : brushMosaic(pal, mask, base, gap));
   return [c(), { f: c(), w: 220 + rand() * 260 }, ...Array.from({ length: randInt(1, 3) }, c)];
 }
 
-// Ready-made little grids, each drawn once: a few per brush palette for a whole switch, and the
-// partly brushed ones as they come (by pieces covered, the switch's colour and a variant).
-const mosaics = new Map();
-function brushMosaic(pal, mask, base) {
-  const whole = mask === 15;
-  // (Colours rounded to 32 levels a channel, so neighbouring switches share pictures.)
-  const q = (h) => '#' + [1, 3, 5].map((k) => Math.min(255, Math.round(parseInt(h.slice(k, k + 2), 16) / 8) * 8).toString(16).padStart(2, '0')).join('');
-  const fill = whole ? '' : q(base);
-  const key = `${pal.join()}|${mask}|${fill}|${randInt(0, whole ? 11 : 3)}`;
-  let f = mosaics.get(key);
-  if (!f) {
-    if (mosaics.size > 3000) mosaics.clear();
-    const tiles = Array.from({ length: 4 }, (_, k) => (mask & (1 << k) ? { ch: pick('#@%*+='), fg: pick(pal) } : { fill }));
-    f = Object.assign(mosaic(tiles, 2, 2, ASCII_FACE, key), { avg: whole ? pick(pal) : fill });
-    mosaics.set(key, f);
+// The brushed pieces' characters, by palette, pieces covered and gutter colour (a few variants
+// of each): their pictures are drawn once and shared; what shows through differs per switch.
+const brushTiles = new Map();
+function brushMosaic(pal, mask, base, gap) {
+  const key = `${pal.join()}|${mask}|${gap}|${randInt(0, mask === 15 ? 11 : 3)}`;
+  let tiles = brushTiles.get(key);
+  if (!tiles) {
+    if (brushTiles.size > 3000) brushTiles.clear();
+    tiles = Array.from({ length: 4 }, (_, k) => (mask & (1 << k) ? { ch: pick('#@%*+='), fg: pick(pal) } : null));
+    brushTiles.set(key, tiles);
   }
-  return f;
+  return Object.assign(mosaic(tiles, 2, 2, ASCII_FACE, gap, key, mask === 15 ? null : base), { avg: faceColour(base) });
 }
 
 const BRUSH_R = 1.15; // the brush's radius, in normal switch widths
@@ -1926,11 +1922,12 @@ function splash(x, y, again = false) {
       const delay = rand() * 40;
       const box = boxAtCell(j);
       if (box) {
-        brushBox(box, () => board.flip(s, concrete(s.abs, s.i), { delay: delay + 50, steps: brushPath(s, mask), stepDur: 85, dur: 190, edgesIn: 50, edgesOut: 110 }));
+        // (Over a section the switches stay bare, as the section is: no board gutters round them.)
+        brushBox(box, () => board.flip(s, concrete(s.abs, s.i), { delay: delay + 50, steps: brushPath(s, mask, cardBg(box)), stepDur: 85, dur: 190 }));
         continue;
       }
       if (isPaint(s.abs)) rememberPaint(s);
-      board.flip(s, concrete(s.abs, s.i), { delay, steps: brushPath(s, mask), stepDur: 85, dur: 190 });
+      board.flip(s, concrete(s.abs, s.i), { delay, steps: brushPath(s, mask, s.gap || board.gapColor), stepDur: 85, dur: 190 });
     }
   }
 }
