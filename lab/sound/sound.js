@@ -23,23 +23,26 @@ const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
  * Cut from Freesound #174056 (see CREDIT): both microphones time-aligned and summed for each
  * tick, a gentle 180 Hz highpass (12 dB/octave; the chain's own, at 200 Hz for this sound,
  * takes off the rest of a low thump the contact microphone picked up), each tick trimmed to its click and natural
- * decay (60 ms, faded out over the last 35), levelled to the same loudness. Each tick's start
+ * decay (up to the next tick in the recording, at most 140 ms, faded out over its last 45%),
+ * levelled to the same loudness. Each tick's start
  * is found again in the decoded audio (decoders differ in how much silence they add).
  */
-const SPRITE = { file: '../assets/sound/pragotron-ticks.mp3', count: 20, lead: 0.1, slot: 0.1, len: 0.06, pre: 0.0015 };
+const SPRITE = { file: '../assets/sound/pragotron-ticks.mp3', count: 20, lead: 0.1, slot: 0.16, len: 0.14, pre: 0.0015 };
 
 /**
- * How a busy board sounds (shared by all three). `rate` landings a second become clicks at
- * the same rate up to `knee`; past it, knee·(rate/knee)^`exp`, eased towards at most `cmax`
- * a second. Each click is (clicks/s ÷ `ref`)^-`fall` as loud (once past `ref`). Up to
- * `cluster` of the clicks (more the busier) follow the one before by `clusterMs`, `clusterDb`
- * quieter. Each click is down by `spread`·u^`skew` dB (u uniform: most near full level,
+ * How a busy board sounds (shared by all three). Every flap that lands clicks, as it lands
+ * (`knee` is past any real rate, so clicks follow landings one for one). Past `perFrame` in
+ * one frame (over 1,400 a second: more than the ear can tell apart) the clicks played stand
+ * in for the rest, a little louder; `maxVoices` caps how many sound at once. Each click is (clicks/s ÷ `ref`)^-`fall`
+ * as loud (once past `ref`), so a busy board is a fuller sound rather than a much louder one.
+ * (`cluster`: echoes of a click, for modules stepping together; off, so every click is a
+ * flap.) Each click is down by `spread`·u^`skew` dB (u uniform: most near full level,
  * some further off, as modules nearer and further), made up for on average by `makeup` dB.
  * `rateJit`: playback rate ± (so repeats differ).
  */
 const DENSITY = {
-  knee: 20, exp: 0.45, cmax: 70, ref: 10, fall: 0.25, cluster: 0.35, clusterMs: [2, 7], clusterDb: [-8, -3],
-  spread: 8, skew: 1.6, makeup: 2.5, rateJit: 0.035, maxVoices: 48, landDb: 2,
+  knee: 1e9, exp: 0.45, cmax: 70, ref: 10, fall: 0.25, cluster: 0, clusterMs: [2, 7], clusterDb: [-8, -3],
+  spread: 8, skew: 1.6, makeup: 2.5, rateJit: 0.035, maxVoices: 160, perFrame: 24, landDb: 2,
 };
 const CHAIN = { pan: 0.35, hpF: 180, masterLp: 15000, shelfF: 6000, shelfDb: 0, glueThr: -18, glueRatio: 2, level: 0 };
 
@@ -52,10 +55,10 @@ const CHAIN = { pan: 0.35, hpF: 180, masterLp: 15000, shelfF: 6000, shelfDb: 0, 
  * decaying with `tauM`. Then a treble shelf (`hfDb` above `hfF`) and a lowpass `lp`.
  */
 const METAL = {
-  len: 34, atk: 0.25, hp: 1300, dipF: 2600, dipQ: 0.6, dipDb: -8, tauC: 3, rattleMs: 5.5, rattleDb: -6,
-  bodyF: 440, bodyQ: 2.4, bodyDb: -11, tauB: 3.2, knockF0: [400, 495], knockDb: [-23, -26], tauK: [4.5, 3.5],
+  len: 75, atk: 0.25, hp: 1300, dipF: 2600, dipQ: 0.6, dipDb: -8, tauC: 4, rattleMs: 5.5, rattleDb: -6,
+  bodyF: 440, bodyQ: 2.4, bodyDb: -11, tauB: 5, knockF0: [400, 495], knockDb: [-23, -26], tauK: [7, 5.5],
   f1: 2700, f1Jit: 0.2, ratios: [1, 1.47, 1.89, 2.37, 2.93, 3.61],
-  modeDb: [-20, -22, -25, -28, -31, -34], tauM: [7, 6, 5, 4.2, 3.6, 3],
+  modeDb: [-20, -22, -25, -28, -31, -34], tauM: [10.5, 9, 7.5, 6.3, 5.4, 4.5],
   hfF: 6500, hfDb: -5, lp: 16000, bounceMs: 13, bounceDb: -20,
 };
 
@@ -72,7 +75,7 @@ const METAL = {
  *   lp          a one-pole lowpass over it all (softer on the ears than the real one).
  */
 const SNAP = {
-  len: 55, atk: 0.06, tauC: 0.7, tailDb: -6, tauN: 7, rbMs: 16, rbDb: -12,
+  len: 100, atk: 0.06, tauC: 0.7, tailDb: -6, tauN: 12, rbMs: 16, rbDb: -12,
   dHp: 1500, directDb: -10, lp: 6000, fJit: 0.015, resJit: 2,
   res: [[470, 9, 6], [560, 8, 0], [680, 10, 3], [900, 7, -5], [1250, 6, -5], [1600, 6, -4], [2100, 6, -6],
     [2850, 10, -5], [3250, 10, -3], [3650, 10, -3], [6200, 6, -9], [9500, 4, -14]],
@@ -152,7 +155,7 @@ export function renderSnap(sr, p, land = false) {
   const k = 1 - Math.exp((-2 * Math.PI * p.lp) / sr);
   for (let i = 0, z = 0; i < n; i++) y[i] = z += k * (y[i] - z);
   const out = run(y, biquad('hp', 180, 0.707, sr));
-  return finish(out, sr, land ? PEAK : PEAK * db(-DENSITY.landDb), 1.5, 0.008);
+  return finish(out, sr, land ? PEAK : PEAK * db(-DENSITY.landDb), 1.5, 0.025);
 }
 
 /** One 'metal' tick (mono, `p.len` ms), rendered offline. `land`: the last flap of a turn. */
@@ -210,7 +213,7 @@ export async function renderMetal(sr, p, land = false) {
   p.ratios.forEach((r, i) => mode(jit(f1 * r, 0.03), L * db(p.modeDb[i] + rand(-2, 2)), p.tauM[i], 0.0002));
   p.knockF0.forEach((f, i) => mode(jit(f, 0.06), L * db(p.knockDb[i] + rand(-2, 2)), p.tauK[i], 0.0008));
   const buf = await oc.startRendering();
-  finish(buf.getChannelData(0), sr, land ? PEAK : PEAK * db(-DENSITY.landDb), 1.5, 0.006);
+  finish(buf.getChannelData(0), sr, land ? PEAK : PEAK * db(-DENSITY.landDb), 1.5, 0.02);
   return buf;
 }
 
@@ -491,9 +494,11 @@ export class FlapSound {
     this.carry = Math.min(0.999, want - count);
     const ends = this.ends;
     for (let i = ends.length - 1; i >= 0; i--) if (ends[i] <= now) ends[i] = ends[ends.length - 1], ends.pop();
-    count = Math.min(count, p.maxVoices - ends.length);
+    const all = count;
+    count = Math.min(count, p.perFrame, p.maxVoices - ends.length);
     if (count <= 0) return;
-    const g = HEAD * db(p.level) * Math.pow(Math.max(cps, p.ref) / p.ref, -p.fall);
+    // (Fewer clicks than landings: each stands in for a few, as loud as they'd be together.)
+    const g = HEAD * db(p.level) * Math.pow(Math.max(cps, p.ref) / p.ref, -p.fall) * Math.sqrt(all / count);
     const busy = clamp((cps - p.knee) / (p.cmax - p.knee), 0, 1);
     let heavy = final === undefined ? -1 : Math.min(count, Math.round((final / n) * count + Math.random() - 0.5));
     // Spread over the frame (clicks all on the frame's edge buzz at 60 Hz), following on from
