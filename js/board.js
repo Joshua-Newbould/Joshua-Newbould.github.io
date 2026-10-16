@@ -91,7 +91,7 @@ export class Board {
   /** How much longer than asked every flip takes. (A smaller flap falls faster, as a pendulum
    *  does: `sizeScale` is the square root of its height against a normal switch's.) */
   get durScale() {
-    return (this.flap === 'snap' ? 1 : 1.2) * (this.sizeScale || 1);
+    return (this.flap === 'snap' ? 1.12 : 1.35) * (this.sizeScale || 1);
   }
 
   /**

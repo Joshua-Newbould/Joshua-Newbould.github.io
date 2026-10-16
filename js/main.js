@@ -1067,7 +1067,7 @@ const visibleBoxes = () => (S.key === 'intro' ? [introEl] : [headerEl(), morphBo
  */
 // Every wave (page, part or theme) crosses the whole screen in the same time, whatever the
 // screen's size, and every switch in it flips at the same pace: one blend step, then the flip.
-const WAVE_MS = 850;
+const WAVE_MS = 1000;
 const FLIP_STEP = 110;
 const FLIP_DUR = 200;
 
@@ -1721,7 +1721,7 @@ function paintStep(now) {
 // never pauses. At the front every switch turns over once, straight to the new colours (and
 // the new gutter), however little its colour changes.
 
-const SWEEP_BAND = 260; // ms the blend takes to pass a point
+const SWEEP_BAND = 300; // ms the blend takes to pass a point
 const SWEEP_FREEZE = 480; // ms ahead of the front that drift flips stop starting (> the longest one ahead)
 
 function startSweep(from, field, lag, gapFrom, fromFrame = null) {
