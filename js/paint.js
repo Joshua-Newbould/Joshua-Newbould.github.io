@@ -245,7 +245,9 @@ export class Paint {
   frame(t, scheme) {
     const { cols, rows } = this;
     const rgb = new Uint8Array(cols * rows * 3);
-    if (!this.gl) {
+    // (`useCpu`: computed in JavaScript although a GPU is there. On a board of small switches,
+    // reading the GPU's result back would wait for all that drawing to finish first.)
+    if (!this.gl || this.useCpu) {
       this.cpu(rgb, t, scheme);
       return { rgb };
     }

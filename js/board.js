@@ -274,6 +274,7 @@ export class Board {
       //   settle  the same, landing with a small bounce, like a heavy mechanical board
       //   crisp   a firm drop that eases into its landing, with the hinge and the flap's edge drawn
       const style = this.flipStyle;
+      const lines = style === 'crisp' && this.cw >= 12; // (the hinge and edge lines: invisible on tiny flaps)
       const grav = (q) => q * q * 0.55 + q * 0.45;
       let turn = grav(p);
       if (style === 'settle') turn = p < 0.8 ? grav(p / 0.8) : 1 - 0.08 * Math.sin((Math.PI * (p - 0.8)) / 0.2);
@@ -298,7 +299,7 @@ export class Board {
         ctx.fillRect(x, y + hy - h, fw, h);
         ctx.globalAlpha = k * 0.3 * sc;
         ctx.fillRect(x, y, fw, hy - h);
-        if (style === 'crisp') this.edge(x, y + hy - h, fw, 1 - sc, shade);
+        if (lines) this.edge(x, y + hy - h, fw, 1 - sc, shade);
       } else {
         const sc = -Math.cos(theta);
         const h = bh * sc;
@@ -309,9 +310,9 @@ export class Board {
         ctx.fillStyle = shade;
         ctx.globalAlpha = k * 0.4 * (1 - sc);
         ctx.fillRect(x, y + hy, fw, h);
-        if (style === 'crisp') this.edge(x, y + hy + h - 1, fw, 1 - sc, shade);
+        if (lines) this.edge(x, y + hy + h - 1, fw, 1 - sc, shade);
       }
-      if (style === 'crisp') {
+      if (lines) {
         // The hinge: a fine dark line across the split while the flap turns.
         ctx.fillStyle = shade;
         ctx.globalAlpha = 0.28 * sh.k;
@@ -397,6 +398,11 @@ export class Board {
   }
 
   tick(now) {
+    // With very many flaps moving at once (a wave across a board of small switches), each flap
+    // still turning is redrawn every other frame, alternate halves of the board in turn; one
+    // starting or landing is always drawn at once.
+    const every = this.active.size > 1500 ? 2 : 1;
+    this.tickNo = (this.tickNo || 0) + 1;
     for (const s of this.active) {
       let changed = false;
       if (s.anim && now >= s.anim.t0 + s.anim.dur) {
@@ -442,7 +448,7 @@ export class Board {
         if (p >= 1) s.caAnim = null;
         changed = true;
       }
-      if (s.anim || changed) this.draw(s, now);
+      if (changed || (s.anim && (s.i + this.tickNo) % every === 0)) this.draw(s, now);
       if (!s.anim && !s.q.length && !s.caAnim) this.active.delete(s);
     }
   }

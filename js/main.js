@@ -6,7 +6,7 @@
 
 import { Board, solid, glyph, source as imageSource, slice } from './board.js';
 import { Paint } from './paint.js';
-import { watchCodes, rampChar, luma } from './secrets.js';
+import { watchCodes } from './secrets.js';
 import { loadLook, saveLook, scheme as makeScheme, gutter, bgMode, mountOptions, COMBOS, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
@@ -170,9 +170,9 @@ const S = {
   brush: null,
   lite: false, // no usable GPU (or too slow): bigger switches, a lighter background
   brushOn: false, // the paint brush works only while its button is on (off on every visit)
-  ascii: false, // the secret ASCII mode (see secrets.js): the background as coloured characters
+  ascii: false, // ASCII mode (the header's >_ button): the background as coloured characters
   player: null, // Bad Apple!! playing on the board (see badapple.js); 'loading' while it loads
-  small: false, // smaller switches (while Bad Apple plays)
+  small: false, // much smaller switches (in ASCII mode, with the brush on, while Bad Apple plays)
 };
 
 const SPEED = 0.032; // background time per second: a steady drift
@@ -294,6 +294,11 @@ function paintFace(r, g, b, ascii = S.ascii) {
   return f;
 }
 const ASCII_FACE = '#07090c';
+const RAMP = '.,:;=+*#%@';
+/** The character for a lightness `t` (0 = the darkest colour on the board now, 1 = the lightest). */
+const rampChar = (t) => RAMP[Math.max(0, Math.min(RAMP.length - 1, Math.floor(t * RAMP.length)))];
+/** Rec. 709 luma of an sRGB colour (0–255 channels), close enough to choose a character. */
+const luma = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
 /** The darkest and lightest background on the board now (characters span the whole range). */
 function frameLuma() {
   const fr = S.frame;
@@ -422,6 +427,17 @@ function build(first) {
   layoutWeb();
   shotCache.clear();
   schedulePrefetch();
+}
+
+/** Small switches are wanted in ASCII mode, with the brush on and while Bad Apple plays. */
+const smallWanted = () => !!(S.ascii || S.brushOn || S.player);
+/** Rebuild the board on small (or normal) switches, if that changes (or `force`): it keeps its colours. */
+function setSmall(small, force = false) {
+  if (small === S.small && !force) return;
+  S.small = small;
+  paint.useCpu = small; // (see paint.frame)
+  S.size = '';
+  build(false);
 }
 
 /** The section that changes between screens: the visible page card, or the title. */
@@ -1656,8 +1672,12 @@ function sweepStep(now) {
   const sw = S.sweep;
   // The two maps, refreshed as the pattern moves (in OKLab, so blends never dip through grey).
   // (Without a GPU the maps are computed in JavaScript: the old one once, the new one less often.)
-  if (now - sw.at > (S.lite ? 600 : 120)) {
+  // (Each read of the maps waits for the GPU to finish drawing; on small switches there is much
+  // more to draw, so they are read half as often, and the starting maps half as often again.)
+  const fine = board.cells.length > 4000;
+  if (now - sw.at > (S.lite ? 600 : fine ? 240 : 120)) {
     sw.at = now;
+    sw.reads = (sw.reads || 0) + 1;
     const toLab = (rgb) => {
       const out = new Float32Array(rgb.length);
       for (let k = 0; k < rgb.length; k += 3) {
@@ -1672,7 +1692,7 @@ function sweepStep(now) {
     if (!first) S.frame = paint.frame(S.pt, sw.to);
     for (const f of sw.srcs) {
       if (!f.lab) f.lab = toLab(f.rgb || paint.frame(S.pt, f.scheme).rgb);
-      else if (!S.lite) f.lab = toLab(paint.frame(S.pt, f.scheme).rgb);
+      else if (!S.lite && (!fine || sw.reads % 2)) f.lab = toLab(paint.frame(S.pt, f.scheme).rgb);
     }
     sw.b = toLab(first && sw.toRgb ? sw.toRgb : S.frame.rgb);
   }
@@ -1802,7 +1822,9 @@ function restoreBrushBoxes(force = false) {
 /** Colours a brushed switch flicks through: one held for a moment, then a couple more. */
 function brushPath() {
   const pal = scheme().brush;
-  const c = () => solid(pick(pal));
+  // (In ASCII mode the brush leaves bold characters in its colours.)
+  const face = (hex) => (S.ascii ? Object.assign(glyph(pick('#@%*'), hex, ASCII_FACE, 600), { avg: hex }) : solid(hex));
+  const c = () => face(pick(pal));
   return [c(), { f: c(), w: 220 + rand() * 260 }, ...Array.from({ length: randInt(1, 3) }, c)];
 }
 
@@ -1810,9 +1832,12 @@ function splash(i, again = false) {
   const col = i % board.cols;
   const row = (i / board.cols) | 0;
   const now = performance.now();
-  for (let dr = -1; dr <= 1; dr++) {
-    for (let dc = -1; dc <= 1; dc++) {
-      if (dr && dc && rand() < 0.5) continue;
+  // (About as wide a stroke on small switches as on normal ones.)
+  const R = S.small ? 3 : 1;
+  for (let dr = -R; dr <= R; dr++) {
+    for (let dc = -R; dc <= R; dc++) {
+      const far = Math.abs(dr) + Math.abs(dc);
+      if (far > R + 1 || (far > R && rand() < 0.5) || (R === 1 && dr && dc && rand() < 0.5)) continue;
       const r = row + dr;
       const c = col + dc;
       if (r < 0 || c < 0 || r >= board.rows || c >= board.cols) continue;
@@ -1820,7 +1845,7 @@ function splash(i, again = false) {
       const s = board.cells[j];
       if (now - s.splash < 200 || (again && board.busy(s))) continue;
       s.splash = now;
-      const delay = (Math.abs(dr) + Math.abs(dc)) * 25;
+      const delay = (far * 25) / R;
       const box = boxAtCell(j);
       if (box) {
         brushBox(box, () => board.flip(s, concrete(s.abs, s.i), { delay: delay + 50, steps: brushPath(), stepDur: 85, dur: 190, edgesIn: 50, edgesOut: 110 }));
@@ -2012,11 +2037,12 @@ brushToggle.addEventListener('click', () => {
   brushToggle.setAttribute('aria-pressed', String(S.brushOn));
   document.documentElement.classList.toggle('brush-on', S.brushOn);
   if (!S.brushOn) dropBrush();
+  setSmall(smallWanted()); // (the brush paints on small switches)
 });
 
 const options = mountOptions(look, onLookChange);
 
-watchCodes({ abacabb: toggleAscii, konami: playBadApple });
+watchCodes({ konami: playBadApple });
 $('#ascii-toggle').addEventListener('click', toggleAscii);
 $('#apple-toggle').addEventListener('click', playBadApple);
 
@@ -2108,13 +2134,16 @@ function switchCards() {
   );
 }
 
-/** The secret ASCII mode: the board ripples out from the middle into coloured characters (or back). */
+/** ASCII mode (the header's >_ button): the board ripples out from the middle into coloured characters (or back). */
 function toggleAscii() {
   if (pendingApply || goingTo || S.overlay || S.sweep) return void setTimeout(toggleAscii, 250); // (once the running transition is done)
+  const on = !S.ascii;
+  // The board takes its new switch size first (keeping its colours), then ripples into the new look.
+  setSmall(on || S.brushOn || !!S.player);
   const sweepFrom = scheme();
   const gapFrom = board.gapColor;
   const fromFrame = S.frame;
-  S.ascii = !S.ascii;
+  S.ascii = on;
   $('#ascii-toggle').setAttribute('aria-pressed', String(S.ascii));
   retintGutter();
   if (reduce.matches) return settleBackground();
@@ -2144,8 +2173,7 @@ async function playBadApple() {
   dropBrush();
   restoreBrushBoxes(true);
   document.documentElement.classList.add('playing');
-  S.small = true;
-  build(false);
+  setSmall(true, true);
   S.player = new Player(board, frames, { dark: solid('#0b0d10'), light: solid('#eef1f5'), rippleMs: WAVE_MS, onEnd: stopBadApple });
   addEventListener('keydown', playerKeys, true);
   addEventListener('pointerdown', stopBadApple, true);
@@ -2166,8 +2194,7 @@ function stopBadApple(e) {
   removeEventListener('pointerdown', stopBadApple, true);
   S.player.release();
   S.player = null;
-  S.small = false;
-  build(false);
+  setSmall(smallWanted(), true);
   // The page comes back the way it first arrives: switching in from the background.
   webGo(() => {}, { fromNothing: true });
   document.documentElement.classList.remove('playing');
