@@ -309,8 +309,9 @@ export class Board {
     const { fw, fh } = this.gm;
     const { x, y } = s;
     const u = Board.under(a.to);
-    // What doesn't move: the piece of the section, edge to edge as a bare flap is (and beyond
-    // the section's right or bottom edge, the gutter, as around the real section).
+    const ca = s.ca ?? 1;
+    // What doesn't move: what the switch showed (on a section, its piece edge to edge as a bare
+    // flap is, and beyond the section's right or bottom edge the gutter, as around it).
     let w = this.cw;
     let h = this.ch;
     if (u.t === 'slice') {
@@ -373,6 +374,12 @@ export class Board {
         ctx.globalAlpha = 1;
       }
     }
+    // The switch's own gutter and corners (on the board), then black beside brushed pieces.
+    if (ca > 0) {
+      ctx.globalAlpha = ca;
+      ctx.drawImage(this.chrome(s.gap || this.gapColor), x, y);
+      ctx.globalAlpha = 1;
+    }
     if (a.to.t === 'mosaic') this.brushGutters(a.to, x, y);
     else if (a.from.t === 'mosaic' && p < 0.5) this.brushGutters(a.from, x, y);
   }
@@ -400,9 +407,9 @@ export class Board {
     const ctx = this.ctx;
     const a = s.anim;
     const ca = s.ca ?? 1; // how much of the flap's edges (gutter, corners, hinge) show
-    // On a section (a bare flap) the brush's little flaps fall on their own, over the section,
-    // and the pieces it hasn't touched don't move: the switch as a whole never flips.
-    if (a && ca === 0 && this.tiled(a)) return this.drawTiles(s, a, now);
+    // Where the brush has been, its little flaps fall on their own and the pieces it hasn't
+    // touched don't move: the switch as a whole never flips.
+    if (a && this.tiled(a)) return this.drawTiles(s, a, now);
     if (!a && ca < 1) {
       // A "bare" flap: its face covers the whole cell, edges faded in by `ca`, so a grid of
       // bare flaps showing slices of a picture is that picture, seamless.
@@ -496,6 +503,7 @@ export class Board {
     if (ca < 1) ctx.globalAlpha = ca;
     if (ca > 0) ctx.drawImage(this.chrome(s.gap || this.gapColor), x, y);
     ctx.globalAlpha = 1;
+    if (!a && s.cur.t === 'mosaic' && s.cur.base) this.brushGutters(s.cur, x, y);
   }
 
   /** A thin catch-light along the flap's moving edge. */

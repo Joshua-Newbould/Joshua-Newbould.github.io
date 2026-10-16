@@ -1863,30 +1863,38 @@ function restoreBrushBoxes(force = false) {
  * go on showing what the switch showed (its colour, or a section's text), so a stroke's edge is
  * softer. Their gutters match what they are over (`gap`).
  */
-function brushPath(s, mask, gap, onSection = false) {
+function brushPath(base, mask) {
   const pal = scheme().brush;
-  const base = concrete(s.abs, s.i);
-  const c = () => (S.small === 'ascii' ? Object.assign(glyph(pick('#@%*'), pick(pal), ASCII_FACE, 600), { avg: pal[0] }) : brushMosaic(pal, mask, base, gap, onSection));
+  const c = () => (S.small === 'ascii' ? Object.assign(glyph(pick('#@%*'), pick(pal), ASCII_FACE, 600), { avg: pal[0] }) : brushMosaic(pal, mask, base));
   return [c(), { f: c(), w: 220 + rand() * 260 }, ...Array.from({ length: randInt(1, 3) }, c)];
 }
 
 // The brushed pieces' characters, by palette, pieces covered and gutter colour (a few variants
 // of each): their pictures are drawn once and shared; what shows through differs per switch.
 const brushTiles = new Map();
-function brushMosaic(pal, mask, base, gap, onSection) {
-  const key = `${pal.join()}|${mask}|${gap}|${randInt(0, mask === 15 ? 11 : 3)}`;
+function brushMosaic(pal, mask, base) {
+  const key = `${pal.join()}|${mask}|${randInt(0, mask === 15 ? 11 : 3)}`;
   let tiles = brushTiles.get(key);
   if (!tiles) {
     if (brushTiles.size > 3000) brushTiles.clear();
     tiles = Array.from({ length: 4 }, (_, k) => (mask & (1 << k) ? { ch: pick('#@%*+='), fg: pick(pal) } : null));
     brushTiles.set(key, tiles);
   }
-  // (On a section every piece keeps the section under it, so each little flap falls on its own.)
-  return Object.assign(mosaic(tiles, 2, 2, ASCII_FACE, gap, key, mask === 15 && !onSection ? null : base), { avg: faceColour(base) });
+  // (Every piece keeps what the switch showed under it, so each little flap falls on its own.)
+  return Object.assign(mosaic(tiles, 2, 2, ASCII_FACE, BRUSH_GAP, key, base), { avg: faceColour(base) });
 }
 
 const BRUSH_R = 1.15; // the brush's radius, in normal switch widths
 const BRUSH_GAP = '#000'; // the brush's gutters: black, as a terminal's (whatever it is over)
+
+/** What a switch the brush is about to paint shows (or is on its way to; one being brushed already
+ *  keeps what it showed before), so that is what it goes back to and what shows between strokes. */
+function heldFace(s) {
+  if (S.small === 'ascii') return concrete(s.abs, s.i);
+  const last = s.q.length ? s.q[s.q.length - 1].f : s.anim ? s.anim.to : s.cur;
+  const f = last.t === 'mosaic' ? last.base : last;
+  return f && f.t !== 'mosaic' && f.t !== 'glyph' ? f : concrete(s.abs, s.i);
+}
 
 /** Paint around a point (CSS px): every switch the brush covers flips through brushed faces and back. */
 function splash(x, y, again = false) {
@@ -1927,16 +1935,21 @@ function splash(x, y, again = false) {
       const box = boxAtCell(j);
       if (box) {
         // (Over a section the switches stay bare, as the section is: no board gutters round them.)
-        brushBox(box, () => board.flip(s, concrete(s.abs, s.i), { delay: delay + 50, steps: brushPath(s, mask, BRUSH_GAP, true), stepDur: 85, dur: 190 }));
+        brushBox(box, () => {
+          const base = heldFace(s);
+          board.flip(s, base, { delay: delay + 50, steps: brushPath(base, mask), stepDur: 85, dur: 190 });
+        });
         continue;
       }
-      if (isPaint(s.abs)) rememberPaint(s);
-      // A brushed switch's own gutter is black too while it is brushed, then back as it was
-      // (unless a wave has given it another meanwhile).
-      const gap = s.gap === BRUSH_GAP ? s.brushGap : s.gap;
-      s.brushGap = gap;
-      s.gap = BRUSH_GAP;
-      board.flip(s, concrete(s.abs, s.i), { delay, steps: brushPath(s, mask, BRUSH_GAP), stepDur: 85, dur: 190, then: () => s.gap === BRUSH_GAP && ((s.gap = gap), board.draw(s, performance.now())) });
+      // The switch holds what it shows while the brush is at work, and goes back to it after;
+      // the background's drift takes it up again from there.
+      const base = heldFace(s);
+      if (isPaint(s.abs) && base.t === 'blank') {
+        s.r = parseInt(base.bg.slice(1, 3), 16);
+        s.g = parseInt(base.bg.slice(3, 5), 16);
+        s.b = parseInt(base.bg.slice(5, 7), 16);
+      }
+      board.flip(s, base, { delay, steps: brushPath(base, mask), stepDur: 85, dur: 190 });
     }
   }
 }
