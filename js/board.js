@@ -46,8 +46,8 @@ export function slice(src, sx, sy, bg = null) {
 }
 
 /** A flap showing a little grid of smaller flaps, each with a character (`tiles`: nx·ny of
- *  { ch, fg }, row by row) on `bg`: where the brush has been. Make few of these and reuse them:
- *  each one's picture is drawn once and kept. */
+ *  { ch, fg }, or { fill } for a piece in a plain colour, row by row) on `bg`: where the brush
+ *  has been. Each one's picture is drawn once and kept (by `key`). */
 export function mosaic(tiles, nx, ny, bg, key) {
   return { t: 'mosaic', tiles, nx, ny, bg, key: 'm' + key, gk: 'M' + key };
 }
@@ -84,12 +84,11 @@ export class Board {
     this.shade = '#000'; // the flip's shading colour, and its strength
     this.shadeK = 1;
     this.shades = new Map(); // gutter colour -> the shading that goes with it
-    this.flipStyle = 'fall'; // how the flap falls: 'fall' (gravity), 'settle' (bounces) or 'crisp'
   }
 
-  /** How much longer than asked a flip takes in the current style (the crisp fall is unhurried). */
+  /** How much longer than asked every flip takes (the crisp fall is unhurried). */
   get durScale() {
-    return this.flipStyle === 'crisp' ? 1.2 : 1;
+    return 1.2;
   }
 
   /** Change the colour of the gutters between flaps at once (on start-up).
@@ -199,6 +198,7 @@ export class Board {
     const id = f.gk;
     let c = this.glyphCache.get(id);
     if (c) return c;
+    if (this.glyphCache.size > 4000) this.glyphCache.clear(); // (the brush's pictures are many: start afresh now and then)
     c = document.createElement('canvas');
     c.width = gm.fw;
     c.height = gm.fh;
@@ -213,6 +213,12 @@ export class Board {
           const w = Math.round(((i + 1) * fw) / f.nx) - x0;
           const h = Math.round(((j + 1) * fh) / f.ny) - y0;
           const t = f.tiles[j * f.nx + i];
+          if (t.fill) {
+            // (A piece the brush hasn't reached: the switch's own colour.)
+            x.fillStyle = t.fill;
+            x.fillRect(x0, y0, w, h);
+            continue;
+          }
           const px = Math.round(Math.min(w * 1.45, h * 0.66));
           x.font = `600 ${px}px ${MONO}`;
           x.fillStyle = t.fg;
@@ -308,23 +314,15 @@ export class Board {
         }
       }
       const p = Math.min(1, Math.max(0, (now - a.t0) / a.dur));
-      // How far the top flap has turned over its hinge (0 … π). Three versions of the fall:
-      //   fall    gravity: it starts slowly and accelerates
-      //   settle  the same, landing with a small bounce, like a heavy mechanical board
-      //   crisp   a firm drop that eases into its landing, with the hinge and the flap's edge drawn
-      const style = this.flipStyle;
-      const lines = style === 'crisp' && this.cw >= 12; // (the hinge and edge lines: invisible on tiny flaps)
-      const grav = (q) => q * q * 0.55 + q * 0.45;
-      let turn = grav(p);
-      if (style === 'settle') turn = p < 0.8 ? grav(p / 0.8) : 1 - 0.08 * Math.sin((Math.PI * (p - 0.8)) / 0.2);
-      else if (style === 'crisp') {
-        const q = p ** 1.3;
-        turn = q * q * (3 - 2 * q);
-      }
+      // How far the top flap has turned over its hinge (0 … π): the crisp fall, a firm drop that
+      // eases into its landing, with the hinge and the flap's edge drawn.
+      const lines = this.cw >= 12; // (the hinge and edge lines: invisible on tiny flaps)
+      const q = p ** 1.3;
+      const turn = q * q * (3 - 2 * q);
       const theta = Math.PI * turn;
       const sh = this.shades.get(s.gap || this.gapColor) || { shade: this.shade, k: this.shadeK };
       const shade = sh.shade;
-      const k = sh.k * (style === 'crisp' ? 1.15 : style === 'settle' ? 1.1 : 1);
+      const k = sh.k * 1.15;
       const bh = fh - hy;
       this.drawPart(a.to, gm, x, 0, hy, y, hy);
       this.drawPart(a.from, gm, x, hy, bh, y + hy, bh);
@@ -364,7 +362,7 @@ export class Board {
     ctx.globalAlpha = 1;
   }
 
-  /** A thin catch-light along the flap's moving edge (the 'crisp' fall). */
+  /** A thin catch-light along the flap's moving edge. */
   edge(x, y, w, strength, shade) {
     const ctx = this.ctx;
     ctx.fillStyle = '#fff';

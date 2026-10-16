@@ -29,26 +29,29 @@ JavaScript read it directly.
   (`Oral`, `Published`, …).
 - **Footer**: the copyright line and the previous/next buttons, labelled automatically.
 
-## Design options
+## Design
 
-Each design decision has a default and two alternatives, defined in `js/design.js`:
+Settled: a hairline header and footer with a numbered nav, Inter Tight titles, console-style
+sections (an inverted title strip and a `>_` status line, on the title screen too) and a crisp
+split-flap fall.
+
+Still open, each with a default and two alternatives in `js/design.js`:
 
 | Decision | Options (default first) |
 | --- | --- |
 | Palette | Mineral · Graphite · Nebula |
 | Background | Silk · Contour · Drift |
-| Header & footer | Hairline · Floating · Frame |
-| Display type | Space Grotesk · Inter Tight · Chakra Petch |
 | Transition | Sweep · Ripple · Cascade |
-| Sections | Window · Plain · Console (also on the temporary square button in the header) |
-| Switch flip | Crisp · Classic · Settle: three versions of the split-flap fall (also on the temporary Fall button in the footer) |
 
 Press **D** (or open `?design`) for a panel to switch them live, or set them in the URL, e.g.
-`?palette=graphite&bg=contour&chrome=frame&font=chakra&motion=ripple&card=plain`. The choice is
-remembered in the browser. To settle on one for good, change `DEFAULT_LOOK` in `js/design.js`.
+`?palette=graphite&bg=contour&motion=ripple`. The choice is remembered in the browser. To settle
+on one for good, change `DEFAULT_LOOK` in `js/design.js`.
 
-With the Mineral palette each page also has three colour combos (`COMBOS`): turn on Pulse in the
-footer and click the background to ripple into the next one.
+With the Mineral palette each page also has three colour combos (`COMBOS`): with the brush off, a
+click on the background ripples into the next one.
+
+The header (and the title screen) also has a paint brush and an ASCII mode (`>_`), which turns
+the background into coloured characters on finer switches.
 
 Colours are built in OKLCH, so lightness and colourfulness stay even across each page's hue
 (by default About apricot, Research indigo, Publications fuchsia, Contact lagoon), held in a soft band

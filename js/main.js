@@ -42,7 +42,6 @@ const themeSwitches = () => $$('.theme-switch'); // the header's, and the title 
 const liveSwitch = () => (S.key === 'intro' ? $('#intro-theme') : themeToggle);
 const brushToggle = $('#brush-toggle');
 const touchy = matchMedia('(hover: none), (pointer: coarse)'); // a touch screen first (no keyboard for the secret codes)
-const cardToggle = $('#card-toggle');
 const prevBtn = $('[data-board="prev"]');
 const nextBtn = $('[data-board="next"]');
 
@@ -101,12 +100,16 @@ for (const pg of pages) {
   bar.className = 'w-bar';
   bar.setAttribute('aria-hidden', 'true');
   bar.innerHTML = '<span class="w-dot"></span><span class="w-path">JN://<b>home</b></span><span class="w-stripes"><i></i><i></i><i></i><i></i></span>';
-  // The sun/moon switch, here too, so the theme can be chosen before entering.
+  // The brush, ASCII mode and the sun/moon switch, here too, so they can be chosen before entering.
+  const brush = brushToggle.cloneNode(true);
+  brush.id = 'intro-brush';
+  const ascii = $('#ascii-toggle').cloneNode(true);
+  ascii.id = 'intro-ascii';
   const sw = themeToggle.cloneNode(true);
   sw.id = 'intro-theme';
   bar.removeAttribute('aria-hidden');
   for (const n of bar.querySelectorAll('.w-dot, .w-path, .w-stripes')) n.setAttribute('aria-hidden', 'true');
-  bar.append(sw);
+  bar.append(brush, ascii, sw);
   introEl.prepend(bar);
   const status = document.createElement('div');
   status.className = 'w-statusline';
@@ -200,7 +203,6 @@ function applyLook() {
   root.dataset.card = look.card === 'console' ? 'window' : look.card;
   if (look.card === 'console') root.dataset.console = '';
   else delete root.dataset.console;
-  board.flipStyle = look.flip;
   root.dataset.theme = S.dark ? 'dark' : 'light';
   paint.mode = bgMode(look);
 }
@@ -588,7 +590,10 @@ function layoutWebBoxes() {
     const hid = introEl.hidden;
     introEl.hidden = false;
     Object.assign(introEl.style, { width: 'max-content', height: 'auto' });
-    const w = Math.min(all - 2 * (narrow ? 2 : 3), Math.ceil((introEl.offsetWidth + gap) / cw) + 2);
+    // (Wide enough for the name, and for the strip with its buttons.)
+    const strip = $('.w-bar', introEl);
+    const need = Math.max(introEl.offsetWidth, strip ? [...strip.children].reduce((n, c) => n + c.offsetWidth + 10, 40) : 0);
+    const w = Math.min(all - 2 * (narrow ? 2 : 3), Math.ceil((need + gap) / cw) + 2);
     introEl.hidden = hid;
     const h = Math.min(rows - 2, measure(introEl, w) + 2);
     place(introEl, Math.floor((all - w) / 2), Math.floor((rows - h) / 2), w, h);
@@ -600,7 +605,7 @@ function layoutWebBoxes() {
   // the nav on the header's row as long as they can, since height is what they lack).
   const short = G.cssH <= 560 && G.cssW > G.cssH;
   fitBar(headerEl(), bw * cw - gap, short ? [[], ['compact'], ['compact', 'tight'], ['stack', 'tight'], ['stack', 'tight', 'abbr']] : [[], ['compact'], ['stack'], ['stack', 'tight'], ['stack', 'tight', 'abbr']]);
-  fitBar(footerEl(), bw * cw - gap, [[], ['compact'], ['nocopy'], ['nocopy', 'compact'], ['nocopy', 'compact', 'arrows'], ['nocopy', 'compact', 'arrows', 'tight']]);
+  fitBar(footerEl(), bw * cw - gap, [[], ['compact'], ['nocopy'], ['nocopy', 'compact'], ['nocopy', 'compact', 'arrows']]);
   {
     // Header and footer share one inset.
     const hd = headerEl();
@@ -798,7 +803,9 @@ function shotKey(el) {
           ? $('#intro-theme').getAttribute('aria-checked')
           : el.dataset.part || '';
   const accent = document.documentElement.style.getPropertyValue('--accent');
-  return [el.id || el.tagName, extra, accent, S.dark, look.palette, look.chrome, look.font, document.documentElement.dataset.card + ('console' in document.documentElement.dataset ? '+c' : ''), board.dpr, r.left, r.top, r.width, r.height].join('|');
+  // (The header and title carry the brush and ASCII buttons, which look pressed while on.)
+  const tools = el === headerEl() || el === introEl ? `${S.brushOn ? 'B' : ''}${S.ascii ? 'A' : ''}` : '';
+  return [el.id || el.tagName, extra, tools, accent, S.dark, look.palette, look.chrome, look.font, document.documentElement.dataset.card + ('console' in document.documentElement.dataset ? '+c' : ''), board.dpr, r.left, r.top, r.width, r.height].join('|');
 }
 function snapshot(el) {
   const key = shotKey(el);
@@ -1792,7 +1799,7 @@ const HOLD_MS = 200; // press this long without moving (or drag) to start painti
 const RESPLASH_MS = 420; // a still, held pointer keeps re-painting its patch
 
 const brushBoxes = new Map(); // element -> { ready, cells, waiting }
-const brushable = () => [headerEl(), footerEl(), morphBox()].filter((el) => el && el !== introEl && !el.closest('[hidden]'));
+const brushable = () => [headerEl(), footerEl(), morphBox()].filter((el) => el && !el.closest('[hidden]'));
 function boxAtCell(i) {
   if (S.overlay) return null;
   const [x, y] = cellCentre(i);
@@ -1847,78 +1854,96 @@ function restoreBrushBoxes(force = false) {
 }
 
 /** Colours a brushed switch flicks through: one held for a moment, then a couple more. */
-function brushPath() {
+/**
+ * The faces a brushed switch passes through before it goes back: bold characters in the brush's
+ * colours. On ASCII mode's small switches, one each; on normal ones the switch splits into a
+ * little grid of four smaller ones, the pieces the brush covers (`mask`) with characters and the
+ * rest in the switch's own colour, so a stroke's edge is softer.
+ */
+function brushPath(s, mask) {
   const pal = scheme().brush;
-  // The brush leaves bold characters in its colours: on ASCII mode's small switches one each,
-  // on normal ones a switch turns into a little grid of smaller ones.
-  const c = () => (S.small === 'ascii' ? Object.assign(glyph(pick('#@%*'), pick(pal), ASCII_FACE, 600), { avg: pal[0] }) : brushMosaic(pal));
+  const base = faceColour(concrete(s.abs, s.i));
+  const c = () => (S.small === 'ascii' ? Object.assign(glyph(pick('#@%*'), pick(pal), ASCII_FACE, 600), { avg: pal[0] }) : brushMosaic(pal, mask, base));
   return [c(), { f: c(), w: 220 + rand() * 260 }, ...Array.from({ length: randInt(1, 3) }, c)];
 }
 
-const mosaics = new Map(); // brush palette -> a few ready-made little grids (each drawn once)
-function brushMosaic(pal) {
-  const key = pal.join();
-  let pool = mosaics.get(key);
-  if (!pool) {
-    pool = Array.from({ length: 12 }, (_, n) => Object.assign(mosaic(Array.from({ length: 4 }, () => ({ ch: pick('#@%*+='), fg: pick(pal) })), 2, 2, ASCII_FACE, `${key}|${n}`), { avg: pal[n % pal.length] }));
-    mosaics.set(key, pool);
+// Ready-made little grids, each drawn once: a few per brush palette for a whole switch, and the
+// partly brushed ones as they come (by pieces covered, the switch's colour and a variant).
+const mosaics = new Map();
+function brushMosaic(pal, mask, base) {
+  const whole = mask === 15;
+  // (Colours rounded to 32 levels a channel, so neighbouring switches share pictures.)
+  const q = (h) => '#' + [1, 3, 5].map((k) => Math.min(255, Math.round(parseInt(h.slice(k, k + 2), 16) / 8) * 8).toString(16).padStart(2, '0')).join('');
+  const fill = whole ? '' : q(base);
+  const key = `${pal.join()}|${mask}|${fill}|${randInt(0, whole ? 11 : 3)}`;
+  let f = mosaics.get(key);
+  if (!f) {
+    if (mosaics.size > 3000) mosaics.clear();
+    const tiles = Array.from({ length: 4 }, (_, k) => (mask & (1 << k) ? { ch: pick('#@%*+='), fg: pick(pal) } : { fill }));
+    f = Object.assign(mosaic(tiles, 2, 2, ASCII_FACE, key), { avg: whole ? pick(pal) : fill });
+    mosaics.set(key, f);
   }
-  return pick(pool);
+  return f;
 }
 
-function splash(i, again = false) {
-  const col = i % board.cols;
-  const row = (i / board.cols) | 0;
+const BRUSH_R = 1.15; // the brush's radius, in normal switch widths
+
+/** Paint around a point (CSS px): every switch the brush covers flips through brushed faces and back. */
+function splash(x, y, again = false) {
+  const dpr = board.dpr;
+  const cwc = board.cw / dpr;
+  const chc = board.ch / dpr;
+  const ox = board.ox / dpr;
+  const oy = board.oy / dpr;
+  const R = BRUSH_R * ((S.layoutGeom || board).cw / dpr);
+  const split = S.small !== 'ascii'; // (normal switches split into four pieces)
   const now = performance.now();
-  // (One switch at a time on the normal board; on ASCII mode's half-size ones, a small patch.)
-  const R = S.small === 'ascii' ? 1 : 0;
-  for (let dr = -R; dr <= R; dr++) {
-    for (let dc = -R; dc <= R; dc++) {
-      const far = Math.abs(dr) + Math.abs(dc);
-      if (far > R + 1 || (far > R && rand() < 0.5) || (R === 1 && dr && dc && rand() < 0.5)) continue;
-      const r = row + dr;
-      const c = col + dc;
-      if (r < 0 || c < 0 || r >= board.rows || c >= board.cols) continue;
+  const c0 = Math.max(0, Math.floor((x - R - ox) / cwc));
+  const c1 = Math.min(board.cols - 1, Math.floor((x + R - ox) / cwc));
+  const r0 = Math.max(0, Math.floor((y - R - oy) / chc));
+  const r1 = Math.min(board.rows - 1, Math.floor((y + R - oy) / chc));
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      // Which pieces the brush covers (their centres inside it, the edge a little ragged).
+      let mask = 0;
+      const pieces = split ? 4 : 1;
+      for (let k = 0; k < pieces; k++) {
+        const px = ox + (c + (split ? (k & 1 ? 0.75 : 0.25) : 0.5)) * cwc;
+        const py = oy + (r + (split ? (k & 2 ? 0.75 : 0.25) : 0.5)) * chc;
+        if (Math.hypot(px - x, py - y) < R * (0.85 + rand() * 0.3)) mask |= 1 << k;
+      }
+      if (!split && mask) mask = 15;
+      if (!mask) continue;
       const j = r * board.cols + c;
       const s = board.cells[j];
-      if (now - s.splash < 200 || (again && board.busy(s))) continue;
+      // (A switch just painted is left to finish, unless the brush now covers more of it.)
+      const had = now - s.splash < 1200 ? s.mask || 0 : 0;
+      const more = (mask | had) !== had;
+      if (!more && (now - s.splash < 200 || (again && board.busy(s)))) continue;
+      mask |= had;
       s.splash = now;
-      const delay = R ? (far * 25) / R : 0;
+      s.mask = mask;
+      const delay = rand() * 40;
       const box = boxAtCell(j);
       if (box) {
-        brushBox(box, () => board.flip(s, concrete(s.abs, s.i), { delay: delay + 50, steps: brushPath(), stepDur: 85, dur: 190, edgesIn: 50, edgesOut: 110 }));
+        brushBox(box, () => board.flip(s, concrete(s.abs, s.i), { delay: delay + 50, steps: brushPath(s, mask), stepDur: 85, dur: 190, edgesIn: 50, edgesOut: 110 }));
         continue;
       }
       if (isPaint(s.abs)) rememberPaint(s);
-      board.flip(s, concrete(s.abs, s.i), { delay, steps: brushPath(), stepDur: 85, dur: 190 });
+      board.flip(s, concrete(s.abs, s.i), { delay, steps: brushPath(s, mask), stepDur: 85, dur: 190 });
     }
   }
 }
 
-/** Every cell on the line between two cells, so fast strokes leave no gaps. */
-function* cellsBetween(a, b) {
-  let x0 = a % board.cols;
-  let y0 = (a / board.cols) | 0;
-  const x1 = b % board.cols;
-  const y1 = (b / board.cols) | 0;
-  const dx = Math.abs(x1 - x0);
-  const dy = -Math.abs(y1 - y0);
-  const sx = x0 < x1 ? 1 : -1;
-  const sy = y0 < y1 ? 1 : -1;
-  let err = dx + dy;
-  for (;;) {
-    yield y0 * board.cols + x0;
-    if (x0 === x1 && y0 === y1) return;
-    const e2 = 2 * err;
-    if (e2 >= dy) {
-      err += dy;
-      x0 += sx;
-    }
-    if (e2 <= dx) {
-      err += dx;
-      y0 += sy;
-    }
-  }
+/** Paint along the pointer's path since the last point painted, so fast strokes leave no gaps. */
+function splashTo(b, x, y) {
+  const stepPx = (S.layoutGeom || board).cw / board.dpr / 2;
+  const x0 = b.px ?? x;
+  const y0 = b.py ?? y;
+  const n = Math.max(1, Math.ceil(Math.hypot(x - x0, y - y0) / stepPx));
+  for (let k = 1; k <= n; k++) splash(x0 + ((x - x0) * k) / n, y0 + ((y - y0) * k) / n);
+  b.px = x;
+  b.py = y;
 }
 
 function startPainting(b) {
@@ -1928,7 +1953,8 @@ function startPainting(b) {
   clearTimeout(b.timer);
   document.documentElement.classList.add('painting');
   document.getSelection()?.removeAllRanges();
-  if (b.last >= 0) splash(b.last);
+  b.px = b.py = null;
+  splashTo(b, b.lx ?? b.x, b.ly ?? b.y);
   b.lastSplash = performance.now();
 }
 
@@ -1971,9 +1997,8 @@ function brushMove(e) {
     b.moved = true;
     startPainting(b);
   }
-  if (b.painting && i >= 0 && i !== b.last) {
-    if (b.last >= 0) for (const j of cellsBetween(b.last, i)) splash(j);
-    else splash(i);
+  if (b.painting && i >= 0) {
+    splashTo(b, e.clientX, e.clientY);
     b.lastSplash = performance.now();
   }
   if (i >= 0) b.last = i;
@@ -1985,7 +2010,8 @@ function brushMove(e) {
 
 canvas.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 || !e.isPrimary) return;
-  if (S.key === 'intro') return enter({ x: e.clientX, y: e.clientY });
+  // (On the title screen a press enters, unless the brush is on: then a tap enters and a hold paints.)
+  if (S.key === 'intro' && (!S.brushOn || reduce.matches)) return enter({ x: e.clientX, y: e.clientY });
   startBrush(e);
 });
 // On the sections a press-and-hold (or drag) paints too; clicks on links and buttons work as usual.
@@ -1993,7 +2019,7 @@ source.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 || !e.isPrimary || e.target.closest('button')) return;
   // Links work as usual, except that a touch on a card with parts may also be a flick.
   if (e.target.closest('a') && (e.pointerType === 'mouse' || !e.target.closest('section.paged'))) return;
-  if (S.key === 'intro') return enter({ x: e.clientX, y: e.clientY });
+  if (S.key === 'intro' && (!S.brushOn || reduce.matches)) return enter({ x: e.clientX, y: e.clientY });
   startBrush(e);
 });
 for (const el of [canvas, source]) {
@@ -2013,6 +2039,10 @@ for (const el of [canvas, source]) {
         const d = Math.abs(dy) > Math.abs(dx) ? dy : dx;
         dropBrush();
         return goPart(d < 0 ? 1 : -1, { x: ex, y: ey });
+      }
+      if (S.key === 'intro' && type === 'pointerup' && !b.painting && !b.moved) {
+        dropBrush();
+        return enter({ x: e.clientX, y: e.clientY });
       }
       dropBrush();
     });
@@ -2037,50 +2067,26 @@ $('#enter').addEventListener('click', () => enter());
 prevBtn.addEventListener('click', () => step(-1, centreOf(prevBtn)));
 nextBtn.addEventListener('click', () => step(1, centreOf(nextBtn)));
 for (const t of themeSwitches()) t.addEventListener('click', toggleTheme);
-// (Temporary, while choosing: window or plain sections.)
-cardToggle.setAttribute('aria-pressed', String(look.card !== 'plain'));
-cardToggle.addEventListener('click', () => {
-  const order = ['window', 'plain', 'console'];
-  look.card = order[(order.indexOf(look.card) + 1) % order.length];
-  saveLook(look);
-  options.render();
-  onLookChange('card');
-});
-// (Temporary, while choosing.) The switch flip style, and the colour pulse.
-const flipToggle = $('#flip-toggle');
-const pulseToggle = $('#pulse-toggle');
-const flipNames = { fall: 'Classic', settle: 'Settle', crisp: 'Crisp' };
-const showFlip = () => ($('.ft-v', flipToggle).textContent = flipNames[look.flip]);
-showFlip();
-flipToggle.addEventListener('click', () => {
-  const order = Object.keys(flipNames);
-  look.flip = order[(order.indexOf(look.flip) + 1) % order.length];
-  saveLook(look);
-  options.render();
-  onLookChange('flip');
-});
-pulseToggle.addEventListener('click', () => {
-  S.pulseOn = !S.pulseOn;
-  pulseToggle.setAttribute('aria-pressed', String(S.pulseOn));
-  $('.ft-v', pulseToggle).textContent = S.pulseOn ? 'On' : 'Off';
-});
-// With the pulse on, a click on the board (not a drag or paint stroke) moves the page to its
+// With the brush off, a click on the board (not a drag or paint stroke) moves the page to its
 // next colour combo, rippling out from the click.
 canvas.addEventListener('click', (e) => {
-  if (!S.pulseOn || S.key === 'intro' || performance.now() - (S.paintedAt || 0) < 300) return;
+  if (S.brushOn || S.key === 'intro' || performance.now() - (S.paintedAt || 0) < 300) return;
   pulseCombo({ x: e.clientX, y: e.clientY });
 });
-brushToggle.addEventListener('click', () => {
-  S.brushOn = !S.brushOn;
-  brushToggle.setAttribute('aria-pressed', String(S.brushOn));
-  document.documentElement.classList.toggle('brush-on', S.brushOn);
-  if (!S.brushOn) dropBrush();
-});
+// The brush and ASCII mode each have a button in the header and one on the title screen.
+for (const btn of $$('.brush-btn')) {
+  btn.addEventListener('click', () => {
+    S.brushOn = !S.brushOn;
+    for (const b of $$('.brush-btn')) b.setAttribute('aria-pressed', String(S.brushOn));
+    document.documentElement.classList.toggle('brush-on', S.brushOn);
+    if (!S.brushOn) dropBrush();
+  });
+}
 
 const options = mountOptions(look, onLookChange);
 
 watchCodes({ konami: playBadApple });
-$('#ascii-toggle').addEventListener('click', toggleAscii);
+for (const btn of $$('.ascii-btn')) btn.addEventListener('click', toggleAscii);
 $('#apple-toggle').addEventListener('click', playBadApple);
 
 window.addEventListener('keydown', (e) => {
@@ -2153,24 +2159,6 @@ const keyFromHash = () => {
 };
 window.addEventListener('popstate', () => go(keyFromHash() || 'intro', { push: false }));
 
-/** A design option changed (from the review panel). */
-/** Window or plain sections: the visible card flips across to the other style in a wave. */
-function switchCards() {
-  cardToggle.setAttribute('aria-pressed', String(look.card !== 'plain'));
-  if (S.key === 'intro' || !board.cells.length) {
-    applyLook();
-    return layoutWeb();
-  }
-  webGo(
-    () => {
-      if (themeWanted()) applyTheme(S.wantDark);
-      applyLook();
-      syncDom();
-    },
-    { dir: 1, toKey: S.key, origin: centreOf(cardToggle) },
-  );
-}
-
 /** ASCII mode (the header's >_ button): the board ripples out from the middle into coloured characters (or back). */
 function toggleAscii() {
   if (pendingApply || goingTo || S.overlay || S.sweep) return void setTimeout(toggleAscii, 250); // (once the running transition is done)
@@ -2182,7 +2170,7 @@ function toggleAscii() {
   const gapFrom = board.gapColor;
   const fromFrame = S.frame;
   S.ascii = on;
-  $('#ascii-toggle').setAttribute('aria-pressed', String(S.ascii));
+  for (const b of $$('.ascii-btn')) b.setAttribute('aria-pressed', String(S.ascii));
   retintGutter();
   if (reduce.matches) return settleBackground();
   startSweep(sweepFrom, motionField('ripple'), -SWEEP_BAND / 2, gapFrom, fromFrame);
@@ -2264,9 +2252,8 @@ function pulseCombo(origin) {
   schedulePrefetch();
 }
 
+/** A design option changed (from the review panel). */
 async function onLookChange(key) {
-  if (key === 'flip') return showFlip(), applyLook();
-  if (key === 'card') return switchCards();
   cancelWeb();
   applyLook();
   shotCache.clear();
@@ -2298,7 +2285,7 @@ function loop(now) {
   if (S.player && S.player !== 'loading') S.player.step(now);
   const b = S.brush;
   if (b && b.painting && b.last >= 0 && now - b.lastSplash >= RESPLASH_MS) {
-    splash(b.last, true);
+    splash(b.px ?? b.x, b.py ?? b.y, true);
     b.lastSplash = now;
   }
   board.tick(now);

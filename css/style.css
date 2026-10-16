@@ -56,12 +56,14 @@
   --display: "Space Grotesk", "Inter Tight", "Helvetica Neue", Arial, sans-serif;
   --display-weight: 700;
   --display-track: -0.02em;
+  --display-scale: 1; /* the display face's size, relative to the type scale */
   --shadow: rgb(0 0 0 / 0.26);
 }
 [data-font="inter"] {
   --display: "Inter Tight", "Helvetica Neue", Arial, sans-serif;
   --display-weight: 800;
   --display-track: -0.025em;
+  --display-scale: 0.91; /* (it runs large) */
 }
 [data-font="chakra"] {
   --display: "Chakra Petch", "Space Grotesk", Arial, sans-serif;
@@ -274,42 +276,6 @@ body {
   padding-bottom: 0;
 }
 
-/* Temporary try-out controls in the footer: the switch flip style and the colour pulse. */
-.foot-tools {
-  display: flex;
-  gap: 6px;
-  margin-left: auto;
-  margin-right: 1.5rem;
-}
-.foot-tools button {
-  white-space: nowrap;
-  padding: 7px 10px;
-  border-radius: 999px;
-  box-shadow: inset 0 0 0 1px var(--line);
-  color: var(--muted);
-  letter-spacing: inherit;
-  text-transform: inherit;
-}
-.foot-tools .ft-v {
-  color: var(--text);
-}
-.foot-tools button[aria-pressed="true"] {
-  background: var(--text);
-  color: var(--surface);
-  box-shadow: none;
-}
-.foot-tools button[aria-pressed="true"] .ft-v {
-  color: var(--surface);
-}
-.js #site > footer.nocopy .foot-tools {
-  margin-left: 0;
-}
-.js #site > footer.tight .foot-tools .ft-k {
-  display: none;
-}
-html:not(.js) .foot-tools {
-  display: none;
-}
 
 /* ---------- Header & footer styles ---------- */
 
@@ -353,10 +319,11 @@ html:not(.js) .foot-tools {
   padding: 0 28px;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 70%, transparent);
 }
-[data-chrome="frame"] #site-nav {
+/* The nav's page numbers (01 About, 02 Research, …). */
+#site-nav {
   counter-reset: nav;
 }
-[data-chrome="frame"] #site-nav a::before {
+.js #site-nav a::before {
   counter-increment: nav;
   content: "0" counter(nav) " ";
   color: var(--accent);
@@ -372,8 +339,7 @@ html:not(.js) .foot-tools {
   gap: 10px;
   flex-shrink: 0;
 }
-#brush-toggle,
-#card-toggle,
+.brush-btn,
 .tool-btn,
 .secret-btn {
   display: grid;
@@ -385,23 +351,17 @@ html:not(.js) .foot-tools {
   box-shadow: inset 0 0 0 1px var(--line);
   color: var(--muted);
 }
-#brush-toggle svg,
-#card-toggle svg,
+.brush-btn svg,
 .tool-btn svg,
 .secret-btn svg {
   width: 14px;
   height: 14px;
 }
-#brush-toggle .bt-handle {
+.brush-btn .bt-handle {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.6;
   stroke-linecap: round;
-}
-#card-toggle svg {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
 }
 .tool-btn svg,
 .secret-btn svg {
@@ -418,33 +378,29 @@ html:not(.js) .foot-tools {
 .js[data-vp~="touch"] .secret-btn {
   display: grid;
 }
-#brush-toggle .bt-tip {
+.brush-btn .bt-tip {
   fill: currentColor;
 }
-#brush-toggle:hover,
-#card-toggle:hover,
+.brush-btn:hover,
 .tool-btn:hover,
 .secret-btn:hover {
   color: var(--text);
 }
-#brush-toggle[aria-pressed="true"],
-#card-toggle[aria-pressed="true"],
+.brush-btn[aria-pressed="true"],
 .tool-btn[aria-pressed="true"],
 .secret-btn[aria-pressed="true"] {
   background: var(--text);
   color: var(--surface);
   box-shadow: none;
 }
-#brush-toggle:focus-visible,
-#card-toggle:focus-visible,
+.brush-btn:focus-visible,
 .tool-btn:focus-visible,
 .secret-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 @media (prefers-reduced-motion: no-preference) {
-  #brush-toggle,
-  #card-toggle,
+  .brush-btn,
   .tool-btn,
 .secret-btn {
     transition: background 0.2s, color 0.2s;
@@ -452,7 +408,8 @@ html:not(.js) .foot-tools {
 }
 /* While the brush is on, the board and cards show where it will paint. */
 html.brush-on #board,
-html.brush-on main section {
+html.brush-on main section,
+html.brush-on #intro {
   cursor: crosshair;
 }
 
@@ -555,7 +512,7 @@ html.brush-on main section {
   margin: 0 0 6px; /* the title groups with the line under it */
   font-family: var(--display);
   font-weight: var(--display-weight);
-  font-size: clamp(30px, 3.6vw, 54px);
+  font-size: calc(clamp(30px, 3.6vw, 54px) * var(--display-scale));
   line-height: 1;
   letter-spacing: var(--display-track);
   text-transform: uppercase;
@@ -746,7 +703,7 @@ html.brush-on main section {
   margin: 0;
   font-family: var(--display);
   font-weight: var(--display-weight);
-  font-size: clamp(34px, 6.6vw, 104px);
+  font-size: calc(clamp(34px, 6.6vw, 104px) * var(--display-scale));
   line-height: 0.95;
   text-wrap: balance;
   letter-spacing: var(--display-track);
@@ -872,21 +829,25 @@ html.brush-on main section {
   opacity: 0.8;
 }
 /* Console: a window whose title strip is inverted and whose status line reads like a prompt. */
-.js[data-console] main .w-bar {
+.js[data-console] :is(main, #intro) .w-bar {
   background: var(--text);
   color: color-mix(in srgb, var(--surface) 70%, var(--text));
   border-bottom-color: var(--text);
 }
-.js[data-console] main .w-path b {
+.js[data-console] :is(main, #intro) .w-path b {
   color: var(--surface);
 }
 .js[data-console] main section[data-page] {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 45%, var(--surface));
 }
-.js[data-console] main .w-statusline::before {
+.js[data-console] main .w-statusline::before,
+.js[data-console] #intro .w-statusline span:first-child::before {
   content: ">_";
   color: var(--accent);
   margin-right: -8px;
+}
+.js[data-console] #intro .w-statusline span:first-child::before {
+  margin-right: 10px;
 }
 
 /* The title box as a window: the strip across its top, the status line along its foot. */
@@ -895,6 +856,9 @@ html.brush-on main section {
   padding-bottom: 50px;
   box-shadow: inset 0 0 0 1px var(--line);
 }
+.js[data-console] #intro {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 45%, var(--surface));
+}
 .js #intro .w-bar {
   position: absolute;
   top: 0;
@@ -902,11 +866,19 @@ html.brush-on main section {
   right: 0;
   margin: 0;
 }
-/* The title box's strip carries the theme switch, so light or dark can be chosen before entering. */
-.js #intro .theme-switch {
+/* The title box's strip carries the brush, ASCII mode and the theme switch, so they can be
+   chosen before entering. */
+.js #intro .theme-switch,
+.js #intro .w-bar button {
   margin-left: 10px;
 }
-.js[data-vp~="short"] #intro .theme-switch {
+.js #intro .w-bar .brush-btn,
+.js #intro .w-bar .tool-btn {
+  width: 22px;
+  height: 22px;
+}
+.js[data-vp~="short"] #intro .theme-switch,
+.js[data-vp~="short"] #intro .w-bar button {
   transform: scale(0.82);
   margin-left: 2px;
 }
@@ -1181,8 +1153,7 @@ html.brush-on main section {
 html:not(.js) #board,
 html:not(.js) #enter,
 html:not(.js) .theme-switch,
-html:not(.js) #brush-toggle,
-html:not(.js) #card-toggle,
+html:not(.js) .brush-btn,
 html:not(.js) .tool-btn,
 html:not(.js) .secret-btn,
 html:not(.js) .foot-nav {
@@ -1201,7 +1172,7 @@ html:not(.js) #source {
 html:not(.js) h1 {
   font-family: var(--display);
   font-weight: var(--display-weight);
-  font-size: clamp(2.6rem, 10vw, 5rem);
+  font-size: calc(clamp(2.6rem, 10vw, 5rem) * var(--display-scale));
   line-height: 1;
   text-transform: uppercase;
   margin: 0.25em 0;

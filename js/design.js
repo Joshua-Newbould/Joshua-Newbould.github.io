@@ -6,14 +6,14 @@
 export const DECISIONS = {
   palette: { label: 'Palette', options: { mineral: 'Mineral', graphite: 'Graphite', nebula: 'Nebula' } },
   bg: { label: 'Background', options: { silk: 'Silk', contour: 'Contour', drift: 'Drift' } },
-  chrome: { label: 'Header & footer', options: { hairline: 'Hairline', floating: 'Floating', frame: 'Frame' } },
-  font: { label: 'Display type', options: { grotesk: 'Space Grotesk', inter: 'Inter Tight', chakra: 'Chakra Petch' } },
   motion: { label: 'Transition', options: { sweep: 'Sweep', ripple: 'Ripple', cascade: 'Cascade' } },
-  card: { label: 'Sections', options: { window: 'Window', plain: 'Plain', console: 'Console' } },
-  flip: { label: 'Switch flip', options: { fall: 'Classic', settle: 'Settle', crisp: 'Crisp' } },
 };
 
-export const DEFAULT_LOOK = { palette: 'mineral', bg: 'silk', chrome: 'hairline', font: 'grotesk', motion: 'sweep', card: 'window', flip: 'crisp' };
+// Settled by the owner (16 October 2026): hairline header and footer (with the frame style's
+// numbered nav), Inter Tight titles, console sections; the switches' crisp fall is built in.
+const SETTLED = { chrome: 'hairline', font: 'inter', card: 'console' };
+
+export const DEFAULT_LOOK = { palette: 'mineral', bg: 'silk', motion: 'sweep', ...SETTLED };
 
 const valid = (k, v) => DECISIONS[k] && Object.hasOwn(DECISIONS[k].options, v);
 
@@ -25,6 +25,8 @@ export function loadLook() {
   const q = new URLSearchParams(location.search);
   for (const k of Object.keys(DECISIONS)) if (q.has(k)) look[k] = q.get(k);
   for (const k of Object.keys(DECISIONS)) if (!valid(k, look[k])) look[k] = DEFAULT_LOOK[k];
+  Object.assign(look, SETTLED); // (whatever an earlier visit chose)
+  delete look.flip;
   return look;
 }
 
