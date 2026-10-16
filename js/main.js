@@ -1886,6 +1886,7 @@ function brushMosaic(pal, mask, base, gap, onSection) {
 }
 
 const BRUSH_R = 1.15; // the brush's radius, in normal switch widths
+const BRUSH_GAP = '#000'; // the brush's gutters: black, as a terminal's (whatever it is over)
 
 /** Paint around a point (CSS px): every switch the brush covers flips through brushed faces and back. */
 function splash(x, y, again = false) {
@@ -1926,11 +1927,16 @@ function splash(x, y, again = false) {
       const box = boxAtCell(j);
       if (box) {
         // (Over a section the switches stay bare, as the section is: no board gutters round them.)
-        brushBox(box, () => board.flip(s, concrete(s.abs, s.i), { delay: delay + 50, steps: brushPath(s, mask, cardBg(box), true), stepDur: 85, dur: 190 }));
+        brushBox(box, () => board.flip(s, concrete(s.abs, s.i), { delay: delay + 50, steps: brushPath(s, mask, BRUSH_GAP, true), stepDur: 85, dur: 190 }));
         continue;
       }
       if (isPaint(s.abs)) rememberPaint(s);
-      board.flip(s, concrete(s.abs, s.i), { delay, steps: brushPath(s, mask, s.gap || board.gapColor), stepDur: 85, dur: 190 });
+      // A brushed switch's own gutter is black too while it is brushed, then back as it was
+      // (unless a wave has given it another meanwhile).
+      const gap = s.gap === BRUSH_GAP ? s.brushGap : s.gap;
+      s.brushGap = gap;
+      s.gap = BRUSH_GAP;
+      board.flip(s, concrete(s.abs, s.i), { delay, steps: brushPath(s, mask, BRUSH_GAP), stepDur: 85, dur: 190, then: () => s.gap === BRUSH_GAP && ((s.gap = gap), board.draw(s, performance.now())) });
     }
   }
 }

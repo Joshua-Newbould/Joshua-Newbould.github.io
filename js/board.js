@@ -225,8 +225,8 @@ export class Board {
           x.fillText(t.ch, x0 + w / 2, y0 + Math.round(h / 2) + Math.round(px * 0.35));
           // Gutters the colour of the ones around (the board's, or a section's surface).
           x.fillStyle = f.gap;
-          if (i) x.fillRect(x0, y0, 1, h);
-          if (j) x.fillRect(x0, y0, w, 1);
+          x.fillRect(x0, y0, 1, h);
+          x.fillRect(x0, y0, w, 1);
           if (i < f.nx - 1) x.fillRect(x0 + w - 1, y0, 1, h);
           if (j < f.ny - 1) x.fillRect(x0, y0 + h - 1, w, 1);
           x.fillStyle = 'rgba(0,0,0,0.3)';
@@ -283,6 +283,24 @@ export class Board {
       ctx.fillRect(dx, dy, tw, dh);
     }
     if (f.t === 'mosaic' && f.tiles[k]) ctx.drawImage(this.glyphCanvas(f, this.gm), tx, ty + py, tw, ph, dx, dy, tw, dh);
+  }
+
+  /** On a bare flap, the gutter strip past the flap's right and bottom edges, beside brushed pieces. */
+  brushGutters(f, x, y) {
+    const ctx = this.ctx;
+    const { fw, fh } = this.gm;
+    ctx.fillStyle = f.gap;
+    for (let j = 0; j < f.ny; j++) {
+      for (let i = 0; i < f.nx; i++) {
+        if (!f.tiles[j * f.nx + i]) continue;
+        const tx = Math.round((i * fw) / f.nx);
+        const ty = Math.round((j * fh) / f.ny);
+        const tw = Math.round(((i + 1) * fw) / f.nx) - tx;
+        const th = Math.round(((j + 1) * fh) / f.ny) - ty;
+        if (i === f.nx - 1) ctx.fillRect(x + fw, y + ty, this.cw - fw, j === f.ny - 1 ? this.ch - ty : th);
+        if (j === f.ny - 1) ctx.fillRect(x + tx, y + fh, i === f.nx - 1 ? this.cw - tx : tw, this.ch - fh);
+      }
+    }
   }
 
   /** A bare flap whose brushed pieces each fall from one face to the next while the rest stays. */
@@ -355,6 +373,8 @@ export class Board {
         ctx.globalAlpha = 1;
       }
     }
+    if (a.to.t === 'mosaic') this.brushGutters(a.to, x, y);
+    else if (a.from.t === 'mosaic' && p < 0.5) this.brushGutters(a.from, x, y);
   }
 
   /** Draw rows [py, py+ph) of a face into the destination band [dy, dy+dh) at column x. */
@@ -403,7 +423,10 @@ export class Board {
       ctx.fillRect(x, y, w, h);
       if (f.t === 'slice') ctx.drawImage(f.src.canvas, f.sx, f.sy, w, h, x, y, w, h);
       else if (f.t === 'glyph' || f.t === 'tri' || f.t === 'mosaic') ctx.drawImage(this.glyphCanvas(f, gm), x, y);
-      if (over) ctx.drawImage(this.glyphCanvas(over, gm), x, y);
+      if (over) {
+        ctx.drawImage(this.glyphCanvas(over, gm), x, y);
+        this.brushGutters(over, x, y);
+      }
       if (ca > 0) {
         ctx.globalAlpha = ca;
         ctx.drawImage(this.chrome(s.gap || this.gapColor), x, y);
