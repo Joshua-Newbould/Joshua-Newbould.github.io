@@ -31,19 +31,21 @@
   input[type=range] { flex: 1; accent-color: var(--acc); height: 32px; }
   #status { margin-top: 24px; min-height: 1.4em; color: var(--dim); }
   #meter { height: 6px; background: var(--flap); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+  .credit { margin-top: 28px; font-size: 12px; }
+  .credit a { color: var(--dim); }
   #meter i { display: block; height: 100%; width: 0; background: var(--acc); transition: width .05s linear; }
 </style>
 </head>
 <body>
 <main>
   <h1>Flap sounds</h1>
-  <p>The first press starts the audio. All three share one quick tick with a warm body and a short metallic ring, tuned to a real board's sound but a little softer; they differ mostly in how a busy board sounds, so try a page wave and the drift on each.</p>
+  <p>The first press starts the audio. A busy board is now many separate clicks with quiet between them, never a wash of noise; try a page wave and the drift on each.</p>
 
   <h2>Sound</h2>
   <div class="row" id="variants">
-    <button data-v="metal" data-name="Metal" aria-pressed="true">A · Metal<small>the tick with its ring; a page turning is an even rain-and-sand wash</small></button>
-    <button data-v="rain" data-name="Rain" aria-pressed="false">B · Rain<small>a touch more ring, a little lower; the wash in larger drops</small></button>
-    <button data-v="sand" data-name="Sand" aria-pressed="false">C · Sand<small>less ring, a little darker; the wash finer, shorter and denser</small></button>
+    <button data-v="pragotron" data-name="Pragotron" aria-pressed="true">A · Pragotron<small>recorded: 20 ticks cut from a real Pragotron board, lightly cleaned</small></button>
+    <button data-v="snap" data-name="Snap" aria-pressed="false">B · Snap<small>synthesised: a sharp snap through the Pragotron’s own resonances</small></button>
+    <button data-v="metal" data-name="Metal" aria-pressed="false">C · Metal<small>the previous synthesised tick with its ring, for comparison</small></button>
   </div>
 
   <h2>Play</h2>
@@ -61,12 +63,19 @@
 
   <div id="status" aria-live="polite">Sound off. Press anything to start.</div>
   <div id="meter"><i></i></div>
+  <p id="credit" class="credit"></p>
 </main>
 <script type="module">
-import { FlapSound } from './sound.js';
+import { FlapSound, CREDIT } from './sound.js';
 import { wave, drift, character, single, total } from './sim.js';
 
-const sound = new FlapSound({ variant: 'metal' });
+const sound = new FlapSound({ variant: 'pragotron' });
+// The credit, with the recording linked.
+const credit = document.getElementById('credit');
+const [pre, post] = CREDIT.split('freesound.org/s/174056');
+const a = Object.assign(document.createElement('a'), { href: 'https://freesound.org/s/174056/', textContent: 'freesound.org/s/174056', rel: 'noopener' });
+credit.append(pre, a, post);
+window.flapSound = sound; // (for tests)
 const status = document.getElementById('status');
 const meter = document.querySelector('#meter i');
 let frames = [], fi = 0, played = 0;

@@ -1,88 +1,162 @@
-// The board's sound: each flap that lands ticks, synthesised (no recordings). A few dozen
-// varied ticks are rendered once, when sound is first switched on, and replayed with small
-// changes of pitch and level. A busy board is not more ticks played louder: it is a wash of
-// tiny quiet grains (the same ticks, mixed once into two loops, one sparse and one dense,
-// crossfaded as the landings thicken), so a page turning over sounds like rain mixed with falling sand.
+// The board's sound: each flap that lands ticks. Three sounds: 'pragotron', ticks cut from a
+// recording of a real Pragotron board (one small file, fetched only once sound is switched
+// on); 'snap', a synthesised tick through the same few fixed resonances as the recording; and
+// 'metal', the earlier synthesised tick with its ring, kept to compare.
+// A busy board is never a wash of noise: it is many separate clicks with quiet between them.
+// The landings a frame are turned into a click rate that grows more and more slowly and is
+// capped (a page turning over is a busy rattle you can still hear click by click), each click
+// a little quieter as the rate rises, spread over the frame with jitter and sometimes in
+// small clusters (modules stepping nearly together).
 // Off by default; a browser won't start audio until someone has pressed something, so a
 // remembered "on" waits for the first press or key (the page passes it on via gesture()).
+
+export const CREDIT = 'Split-flap sound: "pragotron_split-flap-display.wav" by matucha (freesound.org/s/174056), CC BY-NC 4.0, edited.';
 
 const db = (x) => Math.pow(10, x / 20);
 const rand = (a, b) => a + Math.random() * (b - a);
 const jit = (x, f) => x * (1 + (Math.random() * 2 - 1) * f);
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
-const lerp01 = (x, a, b) => clamp(Math.log2(x / a) / Math.log2(b / a), 0, 1); // (on a log scale)
 
 /**
- * The sounds: one tick (an aluminium leaf striking its stop, on a plastic frame) and a texture
- * for a busy board made of the same ticks. Tuned against the measured spectrum and decay of a
- * real board: a warm body around 400-500 Hz, a fairly flat, noisy top, and a short metallic
- * ring (here a touch more ring, a quicker end and a few dB less treble than the real thing,
- * for comfort). Nothing below ~200 Hz. Times in ms, levels in dB.
- *   tick     contact: white noise highpassed at `hp`, decaying with `tauC`, and a small
- *            second hit `rattleMs` later at `rattleDb` (the leaf bouncing once on its stop).
- *            body: noise banded at `bodyF` (Q `bodyQ`) at `bodyDb`, decaying with `tauB`, and
- *            modes `knockF0` at `knockDb`, decaying with `tauK`. ring: the leaf's inharmonic
- *            modes, `f1` times `ratios` (each tick a little different: `f1Jit`), at `modeDb`,
- *            decaying with `tauM`. Then a treble shelf (`hfDb` above `hfF`) and a lowpass `lp`.
- *            land: the last flap of a turn, `landDb` louder with a small bounce.
- *   grains   the texture: ticks from the pool laid down at random (`gDense` a second in the
- *            dense loop, `gSparse` in the sparse one), each played at a rate between `gRate`
- *            (lower: a larger drop), cut short with an extra decay `gTau` ms (0: none),
- *            lowpassed at between `gLp` Hz, at a level spread over `gSpread` dB (`gSkew` > 1:
- *            most grains quiet, a few near), panned across `gWidth`.
- *   busy     ticks are played up to `maxPerFrame` a frame, ducked by `tickDuck` dB once the
- *            texture is in. The texture comes in from `texStart` landings/s, at `texDb` by
- *            `texFull`, then grows `texGrow` dB per doubling (at most `texMax` dB more).
+ * The recorded ticks: one mono MP3 (48 kHz), `count` ticks, the first starting `lead` s in
+ * and each `slot` s after the last, `len` s long, with its click `pre` s after its start.
+ * Cut from Freesound #174056 (see CREDIT): both microphones time-aligned and summed for each
+ * tick, a gentle 180 Hz highpass (12 dB/octave; the chain's own, at 200 Hz for this sound,
+ * takes off the rest of a low thump the contact microphone picked up), each tick trimmed to its click and natural
+ * decay (60 ms, faded out over the last 35), levelled to the same loudness. Each tick's start
+ * is found again in the decoded audio (decoders differ in how much silence they add).
  */
-const TICK = {
+const SPRITE = { file: '../assets/sound/pragotron-ticks.mp3', count: 20, lead: 0.1, slot: 0.1, len: 0.06, pre: 0.0015 };
+
+/**
+ * How a busy board sounds (shared by all three). `rate` landings a second become clicks at
+ * the same rate up to `knee`; past it, knee·(rate/knee)^`exp`, eased towards at most `cmax`
+ * a second. Each click is (clicks/s ÷ `ref`)^-`fall` as loud (once past `ref`). Up to
+ * `cluster` of the clicks (more the busier) follow the one before by `clusterMs`, `clusterDb`
+ * quieter. Each click is down by `spread`·u^`skew` dB (u uniform: most near full level,
+ * some further off, as modules nearer and further), made up for on average by `makeup` dB.
+ * `rateJit`: playback rate ± (so repeats differ).
+ */
+const DENSITY = {
+  knee: 20, exp: 0.45, cmax: 70, ref: 10, fall: 0.25, cluster: 0.35, clusterMs: [2, 7], clusterDb: [-8, -3],
+  spread: 8, skew: 1.6, makeup: 2.5, rateJit: 0.035, maxVoices: 48, landDb: 2,
+};
+const CHAIN = { pan: 0.35, hpF: 180, masterLp: 15000, shelfF: 6000, shelfDb: 0, glueThr: -18, glueRatio: 2, level: 0 };
+
+/**
+ * The 'metal' tick (an aluminium leaf striking its stop, on a plastic frame). Times in ms,
+ * levels in dB. contact: white noise highpassed at `hp`, decaying with `tauC`, and a second
+ * hit `rattleMs` later at `rattleDb`. body: noise banded at `bodyF` (Q `bodyQ`) at `bodyDb`,
+ * decaying with `tauB`, and modes `knockF0` at `knockDb`, decaying with `tauK`. ring: the
+ * leaf's modes, `f1` times `ratios` (each tick a little different: `f1Jit`), at `modeDb`,
+ * decaying with `tauM`. Then a treble shelf (`hfDb` above `hfF`) and a lowpass `lp`.
+ */
+const METAL = {
   len: 34, atk: 0.25, hp: 1300, dipF: 2600, dipQ: 0.6, dipDb: -8, tauC: 3, rattleMs: 5.5, rattleDb: -6,
   bodyF: 440, bodyQ: 2.4, bodyDb: -11, tauB: 3.2, knockF0: [400, 495], knockDb: [-23, -26], tauK: [4.5, 3.5],
   f1: 2700, f1Jit: 0.2, ratios: [1, 1.47, 1.89, 2.37, 2.93, 3.61],
   modeDb: [-20, -22, -25, -28, -31, -34], tauM: [7, 6, 5, 4.2, 3.6, 3],
-  hfF: 6500, hfDb: -5, lp: 16000,
-  landDb: 2, bounceMs: 13, bounceDb: -20,
-  rateJit: 0.035, maxVoices: 48, maxPerFrame: 4,
+  hfF: 6500, hfDb: -5, lp: 16000, bounceMs: 13, bounceDb: -20,
 };
-const CHAIN = { pan: 0.35, hpF: 190, masterLp: 15000, shelfF: 6000, shelfDb: 0, glueThr: -24, glueRatio: 3, level: -2.5 };
-const BUSY = { tickDuck: -7, texStart: 160, texFull: 1600, texDb: -20.5, texGrow: 1, texMax: 2.5 };
+
+/**
+ * The 'snap' tick: a sharp broadband snap through the recording's own resonances (measured
+ * from 20 of its isolated ticks: a body at 470-680 Hz, then peaks near 1.6, 2.85, 3.25-3.85,
+ * 6.2 and 9.5 kHz; every band down 20 dB in 10-15 ms), its spectrum within a few dB of
+ * theirs from 250 Hz up and 1-2 dB softer above 5 kHz. The same for every tick; only the level
+ * of each varies a little (`resJit` dB) and its frequency by ±`fJit`. Times in ms, levels in dB.
+ *   excitation  white noise: a contact (rising in `atk`, decaying with `tauC`) and a tail
+ *               (`tailDb`, decaying with `tauN`); a smaller second contact (`rbDb`) `rbMs` later.
+ *   direct      the excitation itself, highpassed at `dHp`, at `directDb` (the snap's top).
+ *   res         [Hz, Q, dB]: bandpass resonators on the excitation.
+ *   lp          a one-pole lowpass over it all (softer on the ears than the real one).
+ */
+const SNAP = {
+  len: 55, atk: 0.06, tauC: 0.7, tailDb: -6, tauN: 7, rbMs: 16, rbDb: -12,
+  dHp: 1500, directDb: -10, lp: 6000, fJit: 0.015, resJit: 2,
+  res: [[470, 9, 6], [560, 8, 0], [680, 10, 3], [900, 7, -5], [1250, 6, -5], [1600, 6, -4], [2100, 6, -6],
+    [2850, 10, -5], [3250, 10, -3], [3650, 10, -3], [6200, 6, -9], [9500, 4, -14]],
+};
 
 export const VARIANTS = {
-  // The tick with its ring; the wash an even mix of rain and sand.
-  metal: {
-    ...TICK, ...CHAIN, ...BUSY,
-    gRate: [0.9, 1.15], gTau: 0, gLp: [6000, 13000], gSpread: 10, gSkew: 1.3, gSparse: 300, gDense: 2400, gWidth: 0.7,
-    shelfDb: -2,
-  },
-  // A touch more ring; the wash in larger, lower drops, a few of them nearer, like rain on a roof.
-  rain: {
-    ...TICK, ...CHAIN, ...BUSY,
-    f1: 2450, modeDb: [-22, -22, -25, -28, -31, -34], tauM: [8, 7, 5.5, 4.5, 3.8, 3.2],
-    gRate: [0.78, 1], gTau: 0, gLp: [5000, 11000], gSpread: 14, gSkew: 1.4, gSparse: 220, gDense: 2000, gWidth: 0.8,
-  },
-  // Less ring; the wash finer, smaller, shorter and denser, like sand poured onto a tray.
-  sand: {
-    ...TICK, ...CHAIN, ...BUSY,
-    modeDb: [-24, -26, -29, -32, -35, -38], tauM: [6, 4.5, 3.5, 3, 2.5, 2],
-    gRate: [1.05, 1.35], gTau: 3, gLp: [4500, 9000], gSpread: 9, gSkew: 1, gSparse: 600, gDense: 4000, gWidth: 0.65, shelfDb: -3,
-  },
+  pragotron: { kind: 'sample', ...CHAIN, ...DENSITY, rateJit: 0.05, level: 0, hpF: 200, shelfDb: -1.5 },
+  snap: { kind: 'snap', ...SNAP, ...CHAIN, ...DENSITY, rateJit: 0.02, level: -1 },
+  metal: { kind: 'metal', ...METAL, ...CHAIN, ...DENSITY, shelfDb: -2, level: -2.5 },
 };
-export const DEFAULT = 'metal';
+export const DEFAULT = 'pragotron';
 
-const POOL = 24; // ordinary ticks per sound (plus LANDS accents)
+const POOL = 24; // synthesised ticks per sound (plus LANDS heavier ones)
 const LANDS = 6;
 const PANS = 5; // stereo positions (a panner per tick costs more than it adds)
-const HEAD = db(-20); // each tick into the chain (headroom: the glue compressor should only touch waves)
-const MASTER = 4; // the master gain at full volume (a single flap then peaks near -15 dBFS at volume 0.6)
+const HEAD = db(-20); // each tick into the chain (headroom for the glue and limiter)
+const MASTER = 4; // the master gain at full volume
 const SMOOTH = 0.08; // s, how quickly the sense of "how busy" follows the landings
-const LOOPS = [2.71, 3.13]; // s, the sparse and dense texture loops (unequal: they never line up)
-const RATE_LO = 300, RATE_HI = 3000; // landings/s at which the texture is all sparse / all dense
+const PEAK = db(-2.5); // the loudest tick in a pool (a heavier landing)
 const KEY = 'sound';
 
 const AC = typeof window === 'undefined' ? null : window.AudioContext || window.webkitAudioContext;
 const OAC = typeof window === 'undefined' ? null : window.OfflineAudioContext || window.webkitOfflineAudioContext;
 
-/** Render one tick (mono, `p.len` ms) offline. `land`: the last flap of a turn. */
-export async function renderTick(sr, p, land = false) {
+/** Clicks a second for `rate` landings a second (see DENSITY). */
+export function clickRate(rate, p) {
+  if (rate <= p.knee) return rate;
+  const raw = p.knee * Math.pow(rate / p.knee, p.exp);
+  const room = p.cmax - p.knee;
+  return p.knee + room * (1 - Math.exp(-(raw - p.knee) / room));
+}
+
+/** Scale `d` so its peak is `to` (give or take `spread` dB) and fade its last `fadeS` s. */
+function finish(d, sr, to, spread, fadeS) {
+  let pk = 0;
+  for (let i = 0; i < d.length; i++) pk = Math.max(pk, Math.abs(d[i]));
+  const s = (to * db(rand(-spread, spread))) / (pk || 1);
+  const fade = Math.ceil(sr * fadeS);
+  for (let i = 0; i < d.length; i++) d[i] *= s * Math.min(1, (d.length - 1 - i) / fade);
+  return d;
+}
+
+/** RBJ biquad coefficients (`type`: 'bp' constant 0 dB peak, 'hp', 'lp'). */
+function biquad(type, f, q, sr) {
+  const w = (2 * Math.PI * f) / sr, a = Math.sin(w) / (2 * q), c = Math.cos(w), a0 = 1 + a;
+  const b = type === 'bp' ? [a, 0, -a] : type === 'hp' ? [(1 + c) / 2, -(1 + c), (1 + c) / 2] : [(1 - c) / 2, 1 - c, (1 - c) / 2];
+  return [b[0] / a0, b[1] / a0, b[2] / a0, (-2 * c) / a0, (1 - a) / a0];
+}
+function run(x, [b0, b1, b2, a1, a2], g = 1, out = null) {
+  const y = out || new Float32Array(x.length);
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let i = 0; i < x.length; i++) {
+    const v = b0 * x[i] + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+    x2 = x1; x1 = x[i]; y2 = y1; y1 = v;
+    y[i] += v * g; // (into `out`, added; else a new array)
+  }
+  return y;
+}
+
+/** One 'snap' tick (mono, `p.len` ms) as samples. Pure arithmetic: no audio context needed. */
+export function renderSnap(sr, p, land = false) {
+  const n = Math.ceil((sr * p.len) / 1000);
+  const ex = new Float32Array(n);
+  const atk = (jit(p.atk, 0.2) * sr) / 1000, tc = (jit(p.tauC, 0.15) * sr) / 1000, tn = (jit(p.tauN, 0.1) * sr) / 1000;
+  const rb = Math.round((jit(p.rbMs, 0.25) * sr) / 1000), rbG = db(p.rbDb + rand(-3, 3)), tail = db(p.tailDb);
+  const t0 = Math.round(sr * 0.0005);
+  for (let i = t0; i < n; i++) {
+    const t = i - t0, up = 1 - Math.exp(-t / atk);
+    let e = up * (Math.exp(-t / tc) + tail * Math.exp(-t / tn));
+    if (t >= rb) e += rbG * (1 - Math.exp(-(t - rb) / atk)) * Math.exp(-(t - rb) / tc);
+    ex[i] = (Math.random() * 2 - 1) * e;
+  }
+  const y = new Float32Array(n);
+  run(ex, biquad('hp', p.dHp, 0.6, sr), db(p.directDb), y);
+  for (const [f, q, g] of p.res) run(ex, biquad('bp', jit(f, p.fJit), q, sr), db(g + rand(-p.resJit, p.resJit)), y);
+  // A one-pole lowpass (softness), then a highpass at 180 Hz (nothing lower).
+  const k = 1 - Math.exp((-2 * Math.PI * p.lp) / sr);
+  for (let i = 0, z = 0; i < n; i++) y[i] = z += k * (y[i] - z);
+  const out = run(y, biquad('hp', 180, 0.707, sr));
+  return finish(out, sr, land ? PEAK : PEAK * db(-DENSITY.landDb), 1.5, 0.008);
+}
+
+/** One 'metal' tick (mono, `p.len` ms), rendered offline. `land`: the last flap of a turn. */
+export async function renderMetal(sr, p, land = false) {
   const len = Math.ceil((sr * p.len) / 1000);
   const oc = new OAC(1, len, sr);
   const t0 = 0.001;
@@ -100,11 +174,9 @@ export async function renderTick(sr, p, land = false) {
     b.gain.value = gain;
     return b;
   };
-  // Out through a highpass (nothing below ~200 Hz), the treble shelf and a lowpass.
   const out = filter('highpass', 180, 0.7);
   out.connect(filter('highshelf', p.hfF, 0, p.hfDb)).connect(filter('lowpass', jit(p.lp, 0.08), 0.707)).connect(oc.destination);
   const atk = jit(p.atk, 0.15) / 1000;
-  // A decaying envelope from `t` (peak `g`, time constant `tau` ms) on a new gain into `to`.
   const env = (t, g, tau, rise = atk) => {
     const e = oc.createGain();
     e.gain.setValueAtTime(0, t);
@@ -114,24 +186,20 @@ export async function renderTick(sr, p, land = false) {
     return e;
   };
   const hit = (t, g) => {
-    // The contact: broadband noise.
     const s = oc.createBufferSource();
     s.buffer = noise(0.012);
     s.connect(filter('highpass', jit(p.hp, 0.1), 0.7)).connect(filter('peaking', p.dipF, p.dipQ, p.dipDb)).connect(env(t, g, p.tauC));
     s.start(t);
-    // The body: noise banded round `bodyF` (made up for the band's share of the power).
     const b = oc.createBufferSource();
     b.buffer = noise(0.03);
     const f = jit(p.bodyF, 0.08);
     b.connect(filter('bandpass', f, p.bodyQ)).connect(env(t, g * db(p.bodyDb) * Math.sqrt(sr / 2 / (f / p.bodyQ)), p.tauB, 0.0008));
     b.start(t);
   };
-  const L = land ? db(p.landDb) : 1;
+  const L = land ? db(DENSITY.landDb) : 1;
   hit(t0, L);
-  if (p.rattleDb > -60) hit(t0 + jit(p.rattleMs, 0.4) / 1000, L * db(p.rattleDb + rand(-3, 3)));
-  if (land && p.bounceDb > -60) hit(t0 + jit(p.bounceMs, 0.15) / 1000, L * db(p.bounceDb));
-  // Sines from phase 0 over 0.2 ms or more (no click): the ring, a few inharmonic modes of a
-  // thin leaf, and the body's modes.
+  hit(t0 + jit(p.rattleMs, 0.4) / 1000, L * db(p.rattleDb + rand(-3, 3)));
+  if (land) hit(t0 + jit(p.bounceMs, 0.15) / 1000, L * db(p.bounceDb));
   const mode = (f, g, tau, rise) => {
     const o = oc.createOscillator();
     o.frequency.value = f;
@@ -142,104 +210,91 @@ export async function renderTick(sr, p, land = false) {
   p.ratios.forEach((r, i) => mode(jit(f1 * r, 0.03), L * db(p.modeDb[i] + rand(-2, 2)), p.tauM[i], 0.0002));
   p.knockF0.forEach((f, i) => mode(jit(f, 0.06), L * db(p.knockDb[i] + rand(-2, 2)), p.tauK[i], 0.0008));
   const buf = await oc.startRendering();
-  const d = buf.getChannelData(0);
-  let pk = 0;
-  for (let i = 0; i < d.length; i++) pk = Math.max(pk, Math.abs(d[i]));
-  // To -2.5 dBFS for a landing, `landDb` less for a tick, give or take 1.5 dB; the last 6 ms
-  // faded so nothing is cut off sharply.
-  const s = (db(-2.5 - (land ? 0 : p.landDb)) * db(rand(-1.5, 1.5))) / (pk || 1);
-  const fade = Math.ceil(sr * 0.006);
-  for (let i = 0; i < d.length; i++) d[i] *= s * Math.min(1, (d.length - 1 - i) / fade);
+  finish(buf.getChannelData(0), sr, land ? PEAK : PEAK * db(-DENSITY.landDb), 1.5, 0.006);
   return buf;
 }
 
-/**
- * One texture loop (stereo, `seconds` long, `rate` grains a second), mixed straight into the
- * buffer from the sound's own `ticks`: each grain one of them at its own rate, length,
- * brightness, level and place, as a busy board is many flaps at once. Grains near the end
- * wrap round to the start, so the loop has no seam. Normalised to an RMS of 1 (so the denser
- * the loop, the quieter each grain). Yields now and then, so a slow device doesn't stall a
- * frame for long.
- */
-export async function renderTexture(ctx, p, rate, seconds, ticks) {
-  const sr = ctx.sampleRate;
-  const n = Math.ceil(sr * seconds);
-  const buf = ctx.createBuffer(2, n, sr);
-  const L = buf.getChannelData(0), R = buf.getChannelData(1);
-  const src = ticks.map((b) => b.getChannelData(0));
-  const count = Math.round(rate * seconds);
-  const lnR = [Math.log(p.gRate[0]), Math.log(p.gRate[1])];
-  for (let g = 0; g < count; g++) {
-    if (g && g % 400 === 0) await new Promise((r) => setTimeout(r, 0));
-    const d = src[(Math.random() * src.length) | 0];
-    const r = Math.exp(rand(lnR[0], lnR[1]));
-    // (Either polarity, for variety: the ticks are already free of any offset.)
-    const a = db(-p.gSpread * Math.pow(Math.random(), 1 / p.gSkew)) * (Math.random() < 0.5 ? -1 : 1);
-    const pan = rand(-p.gWidth, p.gWidth);
-    const gl = a * Math.cos(((pan + 1) * Math.PI) / 4), gr = a * Math.sin(((pan + 1) * Math.PI) / 4);
-    const tau = p.gTau ? (jit(p.gTau, 0.3) * sr) / 1000 : 0; // samples
-    const cut = tau ? Math.exp(-1 / tau) : 1;
-    const k = 1 - Math.exp((-2 * Math.PI * rand(p.gLp[0], p.gLp[1])) / sr);
-    let len = Math.min(n, Math.floor((d.length - 2) / r));
-    if (tau) len = Math.min(len, Math.ceil(tau * 7)); // (-60 dB)
-    let j = (Math.random() * n) | 0, y = 0, e = 1, x = 0;
-    for (let i = 0; i < len; i++, x += r) {
-      const m = x | 0;
-      y += k * (d[m] + (d[m + 1] - d[m]) * (x - m) - y);
-      const v = y * e;
-      e *= cut;
-      L[j] += v * gl;
-      R[j] += v * gr;
-      if (++j === n) j = 0;
-    }
+/** The recorded ticks, cut from the decoded sprite (`audio`: an AudioBuffer) at the context's rate. */
+export function cutSprite(ctx, audio, sp = SPRITE) {
+  const sr = audio.sampleRate, d = audio.getChannelData(0);
+  const ticks = [];
+  let top = 0;
+  for (let i = 0; i < sp.count; i++) {
+    // Find this tick's click near where it should be: the first sample over a quarter of the
+    // slot's peak (as it was found when the tick was cut).
+    const a = Math.max(0, Math.floor((sp.lead + i * sp.slot - 0.02) * sr)), b = Math.min(d.length, Math.floor((sp.lead + i * sp.slot + 0.07) * sr));
+    let pk = 0;
+    for (let j = a; j < b; j++) pk = Math.max(pk, Math.abs(d[j]));
+    if (!pk) continue;
+    let on = a;
+    while (on < b && Math.abs(d[on]) < pk * 0.25) on++;
+    const st = Math.max(0, on - Math.round(sp.pre * sr)), n = Math.min(Math.round(sp.len * sr), d.length - st);
+    const buf = ctx.createBuffer(1, n, sr);
+    const o = buf.getChannelData(0);
+    const fin = Math.round(sr * 0.0005), fout = Math.round(sr * 0.003);
+    for (let j = 0; j < n; j++) o[j] = d[st + j] * Math.min(1, j / fin, (n - 1 - j) / fout);
+    top = Math.max(top, pk);
+    ticks.push(buf);
   }
-  // A highpass at 200 Hz for anything low the overlaps leave (one pole, run once round the
-  // loop first so it starts where it ends).
-  const kh = 1 - Math.exp((-2 * Math.PI * 200) / sr);
-  let ss = 0;
-  for (const d of [L, R]) {
-    let lo = 0;
-    for (let pass = 0; pass < 2; pass++) for (let i = 0; i < n; i++) {
-      lo += kh * (d[i] - lo);
-      if (pass) d[i] -= lo;
-    }
-    for (let i = 0; i < n; i++) ss += d[i] * d[i];
-  }
-  const s = 1 / (Math.sqrt(ss / (2 * n)) || 1);
-  for (const d of [L, R]) for (let i = 0; i < n; i++) d[i] *= s;
-  return buf;
+  // As one set: the loudest a landing's level, the rest as recorded (already evened out).
+  const s = (PEAK * db(-DENSITY.landDb)) / (top || 1);
+  for (const t of ticks) for (let o = t.getChannelData(0), j = 0; j < o.length; j++) o[j] *= s;
+  return ticks;
 }
 
-/** Everything one sound needs: { ticks, lands, tex: [sparse, dense] }. `ctx` makes the loops. */
-export async function renderPool(ctx, p) {
-  const sr = ctx.sampleRate;
-  const all = await Promise.all(Array.from({ length: POOL + LANDS }, (_, i) => renderTick(sr, p, i >= POOL)));
-  const ticks = all.slice(0, POOL);
-  const tex = [await renderTexture(ctx, p, p.gSparse, LOOPS[0], ticks), await renderTexture(ctx, p, p.gDense, LOOPS[1], ticks)];
-  return { ticks, lands: all.slice(POOL), tex };
+/** Everything one sound needs: { ticks, lands } (heavier landings: a set of their own, or
+ *  the same ticks played `landDb` louder when `lands` is null). */
+export async function renderPool(ctx, name, opts = {}) {
+  const p = VARIANTS[name], sr = ctx.sampleRate;
+  if (p.kind === 'sample') {
+    try {
+      const url = opts.spriteUrl || new URL(SPRITE.file, import.meta.url).href;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(res.status);
+      const raw = await res.arrayBuffer();
+      const audio = await new Promise((ok, no) => {
+        const pr = ctx.decodeAudioData(raw, ok, no);
+        if (pr && pr.then) pr.then(ok, no);
+      });
+      const ticks = cutSprite(ctx, audio);
+      if (ticks.length) return { ticks, lands: null };
+    } catch {}
+    return renderPool(ctx, 'snap'); // (the file didn't come: the synthesised one instead)
+  }
+  if (p.kind === 'snap') {
+    const make = (land) => {
+      const d = renderSnap(sr, p, land);
+      const b = ctx.createBuffer(1, d.length, sr);
+      b.getChannelData(0).set(d);
+      return b;
+    };
+    return { ticks: Array.from({ length: POOL }, () => make(false)), lands: Array.from({ length: LANDS }, () => make(true)) };
+  }
+  const all = await Promise.all(Array.from({ length: POOL + LANDS }, (_, i) => renderMetal(sr, p, i >= POOL)));
+  return { ticks: all.slice(0, POOL), lands: all.slice(POOL) };
 }
 
 export class FlapSound {
-  /** `context`: an AudioContext to use instead of making one (an OfflineAudioContext, for tests). */
-  constructor({ variant = DEFAULT, volume = 0.6, context = null } = {}) {
+  /** `context`: an AudioContext to use instead of making one (an OfflineAudioContext, for
+   *  tests). `spriteUrl`: where the recorded ticks are, if not beside the site's assets. */
+  constructor({ variant = DEFAULT, volume = 0.6, context = null, spriteUrl = null } = {}) {
     this.variant = VARIANTS[variant] ? variant : DEFAULT;
     this.volume = volume;
     this.ctx = context;
+    this.spriteUrl = spriteUrl;
     this.own = !context; // (only a context of our own is suspended when idle)
-    this.pools = new Map(); // variant -> { ticks, lands, tex } (or a promise of them)
+    this.pools = new Map(); // variant -> { ticks, lands } (or a promise of them)
     this.pool = null; // the ready sounds for the current variant; land() is ignored until then
     this.want = false;
     try { this.want = localStorage.getItem(KEY) === 'on'; } catch {}
     this.ends = []; // when each tick still playing ends (the voice cap)
     this.busy = 0; // landings in the last ~80 ms (decaying)
-    this.played = 0; // of those, the ones actually played
-    this.last = -1; // the last buffer played (not repeated straight away)
+    this.carry = Math.random(); // the part of a click owed from earlier frames
+    this.last = null; // the last buffer played (not repeated straight away)
     this.lastAt = 0; // when land() was last called (s, the context's clock)
-    this.nextT = 0; // where the last frame's ticks ended
+    this.nextT = 0; // where the last frame's clicks ended
     this.prevMs = 0;
     this.idle = 0;
-    this.texOn = false; // whether the texture was last set to be heard
-    this.loops = null; // the texture sources playing, and whose they are
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', () => this.level());
     }
@@ -308,9 +363,8 @@ export class FlapSound {
     }
   }
 
-  /** The chain: pan buses for the ticks and a panner for the texture, a steep highpass (no
-   *  rumble or hum), a lowpass and treble shelf for comfort, a compressor to glue a wave
-   *  together, the volume, and a limiter last so that no wave at any volume clips. */
+  /** The chain: pan buses, a steep highpass (no rumble or hum), a lowpass and treble shelf
+   *  for comfort, a gentle compressor, the volume, and a limiter last so that nothing clips. */
   build() {
     const c = this.ctx;
     this.mix = c.createGain();
@@ -347,14 +401,6 @@ export class FlapSound {
       b.connect(this.mix);
       return b;
     });
-    // The texture: two looping sources (sparse, dense) into their own gains, then a panner.
-    this.texPan = c.createStereoPanner ? c.createStereoPanner() : c.createGain();
-    this.texPan.connect(this.mix);
-    this.texG = [c.createGain(), c.createGain()];
-    for (const g of this.texG) {
-      g.gain.value = 0;
-      g.connect(this.texPan);
-    }
     this.tune();
   }
 
@@ -368,43 +414,23 @@ export class FlapSound {
     this.glue.threshold.value = p.glueThr;
     this.glue.ratio.value = p.glueRatio;
     this.buses.forEach((b, i) => b.pan && (b.pan.value = p.pan * ((i / (PANS - 1)) * 2 - 1)));
-    const pool = this.pools.get(this.variant);
-    if (pool && !(pool instanceof Promise)) this.texture(pool);
   }
 
-  /** Start the current sound's texture loops (fading out any other's first). */
-  texture(pool) {
-    if (this.loops && this.loops.pool === pool) return;
-    const c = this.ctx, t = c.currentTime;
-    if (this.loops) {
-      for (const g of this.texG) g.gain.cancelScheduledValues(t), g.gain.setTargetAtTime(0, t, 0.02);
-      for (const s of this.loops.srcs) try { s.stop(t + 0.15); } catch {}
-    }
-    const srcs = pool.tex.map((b, i) => {
-      const s = c.createBufferSource();
-      s.buffer = b;
-      s.loop = true;
-      s.connect(this.texG[i]);
-      s.start(t + (this.loops ? 0.15 : 0), Math.random() * b.duration);
-      return s;
-    });
-    this.loops = { pool, srcs };
-  }
-
-  /** Render the current sound if it isn't yet (about 0.2 s in short chunks, once per sound). */
+  /** Make the current sound ready if it isn't yet (once per sound; the recorded one is
+   *  fetched now, the first time it is wanted). Returns its pool, or a promise of it. */
   prepare() {
     if (!this.ctx) return null;
     const name = this.variant;
     let got = this.pools.get(name);
     if (!got) {
-      got = renderPool(this.ctx, VARIANTS[name]).then((pool) => {
+      got = renderPool(this.ctx, name, { spriteUrl: this.spriteUrl }).then((pool) => {
         this.pools.set(name, pool);
-        if (this.variant === name) {
-          this.pool = pool;
-          if (this.out) this.tune();
-        }
+        if (this.variant === name) this.pool = pool;
         return pool;
-      }, () => null);
+      }, () => {
+        this.pools.delete(name);
+        return null;
+      });
       this.pools.set(name, got);
     }
     if (!(got instanceof Promise)) this.pool = got;
@@ -434,8 +460,8 @@ export class FlapSound {
   /**
    * `n` flaps landed this frame (0 … thousands), around stereo position `pan` (-1 left … 1
    * right: their mean x across the board). `final`: how many of them ended their turn (a
-   * heavier landing); left out, one tick in six is a heavier one. Plays at most a handful of
-   * ticks, spread over the next frame, and lets the texture carry the rest.
+   * heavier landing); left out, one click in six is a heavier one. Plays a few clicks at
+   * most, spread over the next frame.
    */
   land(n = 1, pan = 0, final) {
     if (!this.pool || !this.want || (this.own && document.hidden)) return;
@@ -454,59 +480,47 @@ export class FlapSound {
   landAt(n, pan, final, now, dt) {
     const p = VARIANTS[this.variant];
     const pool = this.pool;
-    const decay = Math.exp(-Math.max(0, now - this.lastAt) / SMOOTH);
+    this.busy = this.busy * Math.exp(-Math.max(0, now - this.lastAt) / SMOOTH) + n;
     this.lastAt = now;
-    this.busy = this.busy * decay + n;
-    this.played *= decay;
+    if (n <= 0 || !pool) return;
     const rate = this.busy / SMOOTH; // landings per second, roughly
-    // The texture: in as the landings thicken (sparse grains, then dense), a little louder
-    // still past `texFull`, and out again (by itself) soon after they stop.
-    const inT = lerp01(rate, p.texStart, p.texFull);
-    if (inT > 0 || this.texOn) {
-      this.texOn = inT > 0;
-      const grow = rate > p.texFull ? Math.min(p.texMax, p.texGrow * Math.log2(rate / p.texFull)) : 0;
-      const T = HEAD * db(p.texDb + grow) * inT * inT;
-      const x = (lerp01(rate, RATE_LO, RATE_HI) * Math.PI) / 2;
-      [Math.cos(x), Math.sin(x)].forEach((m, i) => {
-        const g = this.texG[i].gain;
-        g.cancelScheduledValues(now);
-        g.setTargetAtTime(T * m, now, 0.04);
-        g.setTargetAtTime(0, now + 0.12, 0.1);
-      });
-      if (this.texPan.pan) this.texPan.pan.setTargetAtTime(clamp(pan, -1, 1) * p.pan * 0.6, now, 0.1);
-    }
-    if (n <= 0) return;
+    const cps = clickRate(rate, p);
+    // This frame's share of the clicks (a fraction carried on to the next).
+    const want = (n * cps) / rate + this.carry;
+    let count = Math.min(n, Math.floor(want));
+    this.carry = Math.min(0.999, want - count);
     const ends = this.ends;
     for (let i = ends.length - 1; i >= 0; i--) if (ends[i] <= now) ends[i] = ends[ends.length - 1], ends.pop();
-    // No more a frame than the voices can keep up (filling them all at once, then waiting for
-    // them all to end, pulses at the length of a tick).
-    const steady = Math.max(1, Math.round((p.maxVoices * dt * 1000) / p.len));
-    const count = Math.min(n, p.maxPerFrame, steady, p.maxVoices - ends.length);
+    count = Math.min(count, p.maxVoices - ends.length);
     if (count <= 0) return;
-    this.played += count;
-    // Ticks played close together share one tick's loudness (each down as 1/√ of how many in
-    // 50 ms), and step back further as the texture comes in.
-    const g = (HEAD * db(p.level + p.tickDuck * inT)) / Math.sqrt(Math.max(1, this.played * 0.625));
-    let lands = final === undefined ? -1 : Math.min(count, Math.round((final / n) * count + Math.random() - 0.5));
-    // Spread over the frame (ticks all on the frame's edge buzz at 60 Hz), following on from
+    const g = HEAD * db(p.level) * Math.pow(Math.max(cps, p.ref) / p.ref, -p.fall);
+    const busy = clamp((cps - p.knee) / (p.cmax - p.knee), 0, 1);
+    let heavy = final === undefined ? -1 : Math.min(count, Math.round((final / n) * count + Math.random() - 0.5));
+    // Spread over the frame (clicks all on the frame's edge buzz at 60 Hz), following on from
     // the last frame's unless the clock has got ahead of us.
     let t = this.nextT;
     if (t < now + 0.01 || t > now + 0.08) t = now + 0.02;
     this.nextT = t + dt;
     const spread = n > 1 ? 0.5 : 0;
+    let prev = -1;
     for (let i = 0; i < count; i++) {
-      const heavy = lands < 0 ? Math.random() < 1 / 6 : i < lands;
-      const set = heavy ? pool.lands : pool.ticks;
+      const isLand = heavy < 0 ? Math.random() < 1 / 6 : i < heavy;
+      const set = isLand && pool.lands ? pool.lands : pool.ticks;
       let k = (Math.random() * set.length) | 0;
       if (set[k] === this.last) k = (k + 1) % set.length;
       const s = this.ctx.createBufferSource();
       s.buffer = this.last = set[k];
       const r = (s.playbackRate.value = 1 + (Math.random() * 2 - 1) * p.rateJit);
       const gn = this.ctx.createGain();
-      gn.gain.value = g * db(rand(-1.5, 1.5));
+      // A cluster: this module stepped just after the last one, a little quieter.
+      const near = prev >= 0 && Math.random() < p.cluster * busy;
+      let lv = g * db(p.makeup - p.spread * Math.pow(Math.random(), p.skew)) * (isLand && !pool.lands ? db(p.landDb) : 1);
+      if (near) lv *= db(rand(p.clusterDb[0], p.clusterDb[1]));
+      gn.gain.value = lv;
       const at = clamp(pan + (Math.random() * 2 - 1) * spread, -1, 1);
       s.connect(gn).connect(this.buses[Math.round(((at + 1) / 2) * (PANS - 1))]);
-      const when = t + ((i + Math.random()) / count) * dt;
+      const when = near ? prev + rand(p.clusterMs[0], p.clusterMs[1]) / 1000 : t + ((i + rand(0.1, 0.9)) / count) * dt;
+      prev = when;
       ends.push(when + s.buffer.duration / r);
       s.onended = () => gn.disconnect();
       s.start(when);
