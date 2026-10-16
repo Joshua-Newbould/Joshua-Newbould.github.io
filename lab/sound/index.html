@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flap sounds</title>
+<style>
+  :root { --bg: #0b0b0c; --flap: #1b1b1e; --flap2: #232327; --ink: #ecebe6; --dim: #8a8a86; --acc: #f2b632; --gap: #050506; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; letter-spacing: .12em; text-transform: uppercase; margin: 0 0 4px; }
+  p { color: var(--dim); margin: 0 0 20px; }
+  h2 { font-size: 12px; letter-spacing: .18em; text-transform: uppercase; color: var(--dim); margin: 28px 0 10px; font-weight: 500; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; }
+  button {
+    position: relative; min-height: 64px; padding: 10px 12px; border: 0; border-radius: 4px; cursor: pointer;
+    background: linear-gradient(var(--flap2) 0 calc(50% - 1px), var(--gap) calc(50% - 1px) calc(50% + 1px), var(--flap) calc(50% + 1px) 100%); color: var(--ink);
+    font: inherit; font-size: 14px; letter-spacing: .06em; text-transform: uppercase; text-align: left;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  button small { display: block; color: var(--dim); text-transform: none; letter-spacing: 0; font-size: 12px; margin-top: 2px; }
+  button[aria-pressed="true"] { color: var(--acc); box-shadow: inset 0 0 0 2px var(--acc); }
+  button:active { filter: brightness(1.25); }
+  button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+  .vol { display: flex; align-items: center; gap: 12px; }
+  input[type=range] { flex: 1; accent-color: var(--acc); height: 32px; }
+  #status { margin-top: 24px; min-height: 1.4em; color: var(--dim); }
+  #meter { height: 6px; background: var(--flap); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+  #meter i { display: block; height: 100%; width: 0; background: var(--acc); transition: width .05s linear; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Flap sounds</h1>
+  <p>The first press starts the audio. Use headphones or speakers; phone speakers lose the low knock.</p>
+
+  <h2>Sound</h2>
+  <div class="row" id="variants">
+    <button data-v="solari" aria-pressed="true">A · Solari<small>large airport board</small></button>
+    <button data-v="desk" aria-pressed="false">B · Desk<small>small, crisp unit</small></button>
+    <button data-v="soft" aria-pressed="false">C · Soft<small>for leaving on</small></button>
+  </div>
+
+  <h2>Play</h2>
+  <div class="row">
+    <button data-play="single">Single flap<small>one landing</small></button>
+    <button data-play="character">One character<small>drum turns 3–6 flaps</small></button>
+    <button data-play="page">Page wave<small>~2,000 flaps, 1.3 s, with drift</small></button>
+    <button data-play="ascii">ASCII wave<small>~8,000 flaps</small></button>
+    <button data-play="drift">Drift only<small>a few a frame, 5 s</small></button>
+    <button data-play="stop">Stop<small>drop what’s queued</small></button>
+  </div>
+
+  <h2>Volume</h2>
+  <div class="vol"><input id="vol" type="range" min="0" max="1" step="0.01" value="0.6" aria-label="Volume"><span id="volv">60</span></div>
+
+  <div id="status" aria-live="polite">Sound off. Press anything to start.</div>
+  <div id="meter"><i></i></div>
+</main>
+<script type="module">
+import { FlapSound } from './sound.js';
+import { wave, drift, character, single, total } from './sim.js';
+
+const sound = new FlapSound({ variant: 'solari' });
+const status = document.getElementById('status');
+const meter = document.querySelector('#meter i');
+let frames = [], fi = 0, played = 0;
+
+// A press anywhere is the gesture that lets audio start.
+addEventListener('pointerdown', () => sound.gesture());
+addEventListener('keydown', (e) => {
+  sound.gesture();
+  if (e.key === 'm' && !e.repeat) status.textContent = sound.toggle() ? 'Sound on' : 'Sound off';
+});
+
+async function ensure() {
+  if (!sound.on) sound.enable();
+  else sound.gesture();
+  await sound.prepare?.();
+}
+
+document.getElementById('variants').addEventListener('click', async (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  for (const x of e.currentTarget.children) x.setAttribute('aria-pressed', x === b);
+  sound.setVariant(b.dataset.v);
+  await ensure();
+  status.textContent = `Sound: ${b.textContent.split('·')[1].trim().split(/\s/)[0]}`;
+});
+
+const makers = {
+  single: () => single(),
+  character: () => character(),
+  page: () => wave(600, { drift: 1.5, seconds: 2.4 }),
+  ascii: () => wave(2400, { drift: 1.5, seconds: 2.4, seed: 11 }),
+  drift: () => drift(2, 5),
+};
+document.querySelectorAll('[data-play]').forEach((b) => b.addEventListener('click', async () => {
+  const what = b.dataset.play;
+  if (what === 'stop') { frames = []; fi = 0; status.textContent = 'Stopped'; return; }
+  await ensure();
+  frames = makers[what]();
+  fi = 0;
+  played = 0;
+  status.textContent = `${b.firstChild.textContent.trim()}: ${total(frames).toLocaleString()} flaps`;
+}));
+
+const vol = document.getElementById('vol');
+vol.addEventListener('input', () => {
+  sound.setVolume(+vol.value);
+  document.getElementById('volv').textContent = Math.round(vol.value * 100);
+});
+sound.setVolume(+vol.value);
+
+// Play the frames at the display's rate, one simulated 60 fps frame per real one (near enough).
+let lastMs = 0, acc = 0;
+function loop(ms) {
+  const dt = lastMs ? Math.min(0.1, (ms - lastMs) / 1000) : 1 / 60;
+  lastMs = ms;
+  acc += dt;
+  let n = 0, sx = 0, fin = 0;
+  while (acc >= 1 / 60 && fi < frames.length) {
+    const f = frames[fi++];
+    n += f.n; sx += f.pan * f.n; fin += f.final;
+    acc -= 1 / 60;
+  }
+  if (fi >= frames.length) acc = 0;
+  if (n) sound.land(n, sx / n, fin);
+  meter.style.width = Math.min(100, Math.sqrt(n / 60) * 100) + '%';
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
