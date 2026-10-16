@@ -44,9 +44,9 @@ const DENSITY = {
   knee: 1e9, exp: 0.45, cmax: 70, ref: 10, fall: 0.25, cluster: 0, clusterMs: [2, 7], clusterDb: [-8, -3],
   spread: 8, skew: 1.6, makeup: 2.5, rateJit: 0.035, maxVoices: 160, perFrame: 24, landDb: 2,
 };
-// `speed`: every tick is played this much slower than it was recorded or made (longer, and a
-// little lower), as a heavier, slower flap would sound.
-const CHAIN = { pan: 0.35, hpF: 180, masterLp: 15000, shelfF: 6000, shelfDb: 0, glueThr: -18, glueRatio: 2, level: 0, speed: 0.85 };
+// `length`: every tick drawn out this many times longer, at the same pitch (its click kept as it
+// is, its ring and decay stretched); `pitch`: semitones up or down, at the same length.
+const CHAIN = { pan: 0.35, hpF: 180, masterLp: 15000, shelfF: 6000, shelfDb: 0, glueThr: -18, glueRatio: 2, level: 0, length: 1.18, pitch: 0 };
 
 /**
  * The 'metal' tick (an aluminium leaf striking its stop, on a plastic frame). Times in ms,
@@ -118,6 +118,96 @@ function finish(d, sr, to, spread, fadeS) {
   const fade = Math.ceil(sr * fadeS);
   for (let i = 0; i < d.length; i++) d[i] *= s * Math.min(1, (d.length - 1 - i) / fade);
   return d;
+}
+
+/** In-place radix-2 FFT of (re, im); `inv` for the inverse (scaled by 1/n). */
+function fft(re, im, inv) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      let t = re[i]; re[i] = re[j]; re[j] = t;
+      t = im[i]; im[i] = im[j]; im[j] = t;
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const a = ((inv ? 2 : -2) * Math.PI) / len, wr = Math.cos(a), wi = Math.sin(a), h = len >> 1;
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let j = 0; j < h; j++) {
+        const k = i + j + h, tr = re[k] * cr - im[k] * ci, ti = re[k] * ci + im[k] * cr;
+        re[k] = re[i + j] - tr;
+        im[k] = im[i + j] - ti;
+        re[i + j] += tr;
+        im[i + j] += ti;
+        const t = cr * wr - ci * wi;
+        ci = cr * wi + ci * wr;
+        cr = t;
+      }
+    }
+  }
+  if (inv) for (let i = 0; i < n; i++) (re[i] /= n), (im[i] /= n);
+}
+
+const VN = 1024, VH = 256; // vocoder frame and hop (75% overlap)
+const HANN = Float64Array.from({ length: VN }, (_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / VN));
+
+/** `s` made `f` times longer at the same pitch (a phase vocoder: frames read `f` times closer
+ *  together than they are written, each bin's phase carried on at its own frequency). */
+function vocode(s, f) {
+  const half = VN / 2, Ha = VH / f, M = Math.ceil(s.length * f), K = Math.floor(M / VH) + 1;
+  const out = new Float32Array(M + VN);
+  const re = new Float64Array(VN), im = new Float64Array(VN);
+  const last = new Float64Array(half + 1), acc = new Float64Array(half + 1);
+  let prev = 0;
+  for (let k = 0; k < K; k++) {
+    const ta = Math.round(k * Ha), st = ta - half;
+    for (let i = 0; i < VN; i++) {
+      const j = st + i;
+      re[i] = (j >= 0 && j < s.length ? s[j] : 0) * HANN[i];
+      im[i] = 0;
+    }
+    fft(re, im, false);
+    const dt = ta - prev;
+    for (let b = 0; b <= half; b++) {
+      const mag = Math.hypot(re[b], im[b]), ph = Math.atan2(im[b], re[b]), w = (2 * Math.PI * b) / VN;
+      if (!k) acc[b] = ph;
+      else if (dt > 0) {
+        let d = ph - last[b] - w * dt;
+        d -= 2 * Math.PI * Math.round(d / (2 * Math.PI));
+        acc[b] += (w + d / dt) * VH;
+      } else acc[b] += w * VH;
+      last[b] = ph;
+      re[b] = mag * Math.cos(acc[b]);
+      im[b] = mag * Math.sin(acc[b]);
+    }
+    im[0] = im[half] = 0;
+    for (let b = 1; b < half; b++) (re[VN - b] = re[b]), (im[VN - b] = -im[b]);
+    fft(re, im, true);
+    const ts = k * VH;
+    for (let i = 0; i < VN; i++) out[ts + i] += (re[i] * HANN[i]) / 1.5; // (Hann² at 75% overlap adds up to 1.5)
+    prev = ta;
+  }
+  return out.subarray(half, half + M);
+}
+
+/** A tick `f` times longer at the same pitch: its first 4.5 ms (the click) as it is, the rest
+ *  stretched, crossfaded over 4 ms, and faded out at the end. */
+export function stretch(x, sr, f) {
+  if (Math.abs(f - 1) < 0.01) return Float32Array.from(x);
+  const A = Math.round(sr * 0.0045), F = Math.round(sr * 0.002);
+  if (x.length <= A + 4 * F) return Float32Array.from(x);
+  const y = vocode(x.subarray(A - F), f);
+  const out = new Float32Array(A - F + y.length);
+  out.set(x.subarray(0, A - F));
+  const fade = Math.round(sr * 0.01);
+  for (let i = 0; i < y.length; i++) {
+    const w = Math.min(1, i / (2 * F)), o = A - F + i < x.length ? x[A - F + i] : 0;
+    out[A - F + i] = (o * (1 - w) + y[i] * w) * Math.min(1, (y.length - 1 - i) / fade);
+  }
+  return out;
 }
 
 /** RBJ biquad coefficients (`type`: 'bp' constant 0 dB peak, 'hp', 'lp'). */
@@ -348,9 +438,48 @@ export class FlapSound {
     this.level();
   }
 
-  /** Play every tick at `v` times its speed instead of the sound's own (null: the sound's own). */
-  setSpeed(v) {
-    this.speed = v == null ? null : clamp(v, 0.05, 2);
+  /** Draw every tick out `v` times longer, at the same pitch (null: the sound's own). */
+  setLength(v) {
+    this.length = v == null ? null : clamp(v, 0.5, 12);
+    this.reshape();
+  }
+
+  /** Every tick `v` semitones higher or lower, at the same length (null: the sound's own). */
+  setPitch(v) {
+    this.pitch = v == null ? null : clamp(v, -24, 24);
+    this.reshape();
+  }
+
+  /** The current sound's ticks at the chosen length and pitch: worked out once per change, a
+   *  few ticks at a time so the page never stalls (the last set plays meanwhile). */
+  reshape() {
+    const name = this.variant, raw = this.pools.get(name);
+    if (!raw || raw instanceof Promise) return;
+    const p = VARIANTS[name], f = (this.length ?? p.length) * Math.pow(2, (this.pitch ?? p.pitch) / 12);
+    const key = `${name}|${f.toFixed(3)}`;
+    if (key === this.shapeKey) return;
+    this.shapeKey = key;
+    const job = (this.job = {});
+    if (Math.abs(f - 1) < 0.01) return void (this.pool = raw);
+    const sr = this.ctx.sampleRate;
+    const make = async (set) => {
+      if (!set) return null;
+      const out = [];
+      for (const b of set) {
+        const d = stretch(b.getChannelData(0), sr, f);
+        const nb = this.ctx.createBuffer(1, d.length, sr);
+        nb.getChannelData(0).set(d);
+        out.push(nb);
+        await new Promise((r) => setTimeout(r, 0));
+        if (this.job !== job) return null;
+      }
+      return out;
+    };
+    (async () => {
+      const ticks = await make(raw.ticks);
+      const lands = ticks && (await make(raw.lands));
+      if (this.job === job && ticks) this.pool = { ticks, lands };
+    })();
   }
 
   /** How much of the recording's room the recorded ticks keep: 1 as recorded, 0 dry (each
@@ -441,7 +570,11 @@ export class FlapSound {
     if (!got) {
       got = renderPool(this.ctx, name, { spriteUrl: this.spriteUrl }).then((pool) => {
         this.pools.set(name, pool);
-        if (this.variant === name) this.pool = pool;
+        if (this.variant === name) {
+          this.pool = pool;
+          this.shapeKey = null;
+          this.reshape();
+        }
         return pool;
       }, () => {
         this.pools.delete(name);
@@ -449,7 +582,10 @@ export class FlapSound {
       });
       this.pools.set(name, got);
     }
-    if (!(got instanceof Promise)) this.pool = got;
+    if (!(got instanceof Promise)) {
+      if (this.shapeKey?.split('|')[0] !== name) (this.pool = got), (this.shapeKey = null);
+      this.reshape();
+    }
     if (this.out) this.tune();
     return got;
   }
@@ -528,7 +664,8 @@ export class FlapSound {
       if (set[k] === this.last) k = (k + 1) % set.length;
       const s = this.ctx.createBufferSource();
       s.buffer = this.last = set[k];
-      const r = (s.playbackRate.value = (this.speed ?? p.speed) * (1 + (Math.random() * 2 - 1) * p.rateJit));
+      const pr = Math.pow(2, (this.pitch ?? p.pitch) / 12); // (the ticks were drawn out by this much more, to make up)
+      const r = (s.playbackRate.value = pr * (1 + (Math.random() * 2 - 1) * p.rateJit));
       const gn = this.ctx.createGain();
       // A cluster: this module stepped just after the last one, a little quieter.
       const near = prev >= 0 && Math.random() < p.cluster * busy;
@@ -543,9 +680,9 @@ export class FlapSound {
       const when = near ? prev + rand(p.clusterMs[0], p.clusterMs[1]) / 1000 : t + ((i + rand(0.1, 0.9)) / count) * dt;
       prev = when;
       if (room < 1) {
-        const at = when + 0.006 / r; // (times in the tick's own time: slowed down with it)
+        const at = when + 0.006 / r; // (the click is as it was; its decay is drawn out with it)
         gn.gain.setValueAtTime(lv, at);
-        gn.gain.setTargetAtTime(0, at, (0.008 + 0.09 * room) / r);
+        gn.gain.setTargetAtTime(0, at, ((0.008 + 0.09 * room) * (this.length ?? p.length)) / (r / pr));
       }
       ends.push(when + s.buffer.duration / r);
       s.onended = () => gn.disconnect();

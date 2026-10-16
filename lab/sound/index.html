@@ -60,8 +60,10 @@
 
   <h2>Volume</h2>
   <div class="vol"><input id="vol" type="range" min="0" max="1" step="0.01" value="0.6" aria-label="Volume"><span id="volv">60</span></div>
-  <h2>Speed (lower = slower, longer ticks)</h2>
-  <div class="vol"><input id="spd" type="range" min="0.1" max="1.2" step="0.01" value="0.85" aria-label="Speed"><span id="spdv">85%</span></div>
+  <h2>Length (same pitch)</h2>
+  <div class="vol"><input id="len" type="range" min="1" max="10" step="0.05" value="1.18" aria-label="Length"><span id="lenv">1.18×</span></div>
+  <h2>Pitch (semitones, same length)</h2>
+  <div class="vol"><input id="pit" type="range" min="-12" max="12" step="0.5" value="0" aria-label="Pitch"><span id="pitv">0</span></div>
   <h2>Room (Pragotron only: 0 = dry, 100 = as recorded)</h2>
   <div class="vol"><input id="room" type="range" min="0" max="1" step="0.01" value="0.3" aria-label="Room"><span id="roomv">30%</span></div>
 
@@ -129,12 +131,13 @@ vol.addEventListener('input', () => {
   document.getElementById('volv').textContent = Math.round(vol.value * 100);
 });
 sound.setVolume(+vol.value);
-const spd = document.getElementById('spd');
-spd.addEventListener('input', () => {
-  sound.setSpeed(+spd.value);
-  document.getElementById('spdv').textContent = Math.round(spd.value * 100) + '%';
-});
-sound.setSpeed(+spd.value);
+const len = document.getElementById('len'), pit = document.getElementById('pit');
+len.addEventListener('change', () => sound.setLength(+len.value));
+len.addEventListener('input', () => (document.getElementById('lenv').textContent = (+len.value).toFixed(2) + '×'));
+pit.addEventListener('change', () => sound.setPitch(+pit.value));
+pit.addEventListener('input', () => (document.getElementById('pitv').textContent = (pit.value > 0 ? '+' : '') + pit.value));
+sound.setLength(+len.value);
+sound.setPitch(+pit.value);
 const room = document.getElementById('room');
 room.addEventListener('input', () => {
   sound.setRoom(+room.value);
