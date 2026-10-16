@@ -5,14 +5,16 @@
 // the design system and its variations (design.js), and the transitions below.
 
 import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js';
+import { GLBoard } from './glboard.js';
 import { Paint } from './paint.js';
 import { watchCodes } from './secrets.js';
+import { FlapSound } from './sound.js';
 import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, bgMode, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-const canvas = $('#board');
+let canvas = $('#board'); // (a new one if the GPU is lost for good: see fallBack)
 const source = $('#source');
 const introEl = $('#intro');
 const siteEl = $('#site');
@@ -184,13 +186,58 @@ const SPEED = 0.032; // background time per second: a steady drift
 const stepMs = () => (S.lite ? 900 : 500);
 const paintThreshold = () => (S.lite ? 22 : 16);
 
-const board = new Board(canvas);
-// (While comparing: ?flap=clack (the default), snap or crisp.)
+const paint = new Paint(); // (first: whether there is a real GPU decides how the board is drawn)
+const boardListeners = []; // the board canvas's input handlers (see onBoard)
+let board = makeBoard();
+// (While comparing: ?flap=crisp (the default), clack or snap.)
 {
   const f = new URLSearchParams(location.search).get('flap');
   if (['clack', 'snap', 'crisp'].includes(f)) board.flap = f;
 }
-const paint = new Paint();
+
+/**
+ * The board, drawn by the GPU (glboard.js) where there is a real one, else on a 2D canvas: with
+ * no WebGL2, a software GPU (lite), or ?gl=0. (?gl=1: by the GPU even if it is a slow one; until
+ * GL_BY_DEFAULT is on, only then.)
+ */
+function makeBoard() {
+  const GL_BY_DEFAULT = false; // (off until it has been tried on more devices: ?gl=1 turns it on)
+  const want = new URLSearchParams(location.search).get('gl');
+  const gl = want !== '0' && (want === '1' || (GL_BY_DEFAULT && !paint.lite)) && GLBoard.create(canvas, { force: want === '1' });
+  if (gl) {
+    gl.onfail = fallBack;
+    return gl;
+  }
+  const b = new Board(canvas);
+  if (b.ctx) return b;
+  // (WebGL got as far as the canvas, then failed: a canvas keeps the kind of context it had.)
+  newCanvas();
+  return new Board(canvas);
+}
+
+/** The GPU was lost for good: carry on with the board on a 2D canvas. */
+function fallBack() {
+  const flap = board.flap;
+  newCanvas();
+  board = new Board(canvas);
+  board.flap = flap;
+  if (S.player && S.player !== 'loading') S.player.board = board;
+  S.size = '';
+  build(false);
+}
+
+/** A fresh board canvas in place of the old one, with the same input handlers. */
+function newCanvas() {
+  const c = canvas.cloneNode(false);
+  canvas.replaceWith(c);
+  canvas = c;
+  for (const [type, fn] of boardListeners) c.addEventListener(type, fn);
+}
+/** Listen on the board canvas (whichever it is). */
+function onBoard(type, fn) {
+  boardListeners.push([type, fn]);
+  canvas.addEventListener(type, fn);
+}
 const scheme = (key = S.key) => makeScheme(key, S.dark, look);
 const pageIndex = (id) => pages.findIndex((p) => p.id === id);
 
@@ -432,6 +479,9 @@ function build(first) {
     S.layoutGeom = { ...normal, gap: Math.max(1, Math.round(dpr)) };
     const m = S.small === 'ascii' ? Board.subdivide(normal, 2) : S.small === 'apple' ? Board.metrics(cssW, cssH, dpr, Math.max(4, cellTarget(cssW, cssH) * (S.lite ? 0.55 : 0.4)), 1.9) : normal;
     board.configure(m, solid(board.gapColor));
+    // (A sweep still crossing the board was for the old switches: the new ones start out in the
+    // new colours.)
+    if (S.sweep && S.sweep.turned.length !== board.cells.length) S.sweep = null;
     board.sizeScale = Math.sqrt(m.ch / normal.ch);
     paint.resize(board);
     S.frame = paint.frame(S.pt, scheme());
@@ -455,13 +505,7 @@ const smallWanted = () => (S.player ? 'apple' : S.ascii ? 'ascii' : false);
  */
 function setSmall(mode, { force = false, smooth = false } = {}) {
   if (mode === S.small && !force) return false;
-  let shot = null;
-  if (smooth && board.cells.length) {
-    shot = document.createElement('canvas');
-    shot.width = board.canvas.width;
-    shot.height = board.canvas.height;
-    shot.getContext('2d').drawImage(board.canvas, 0, 0);
-  }
+  const shot = smooth && board.cells.length ? board.capture() : null;
   S.small = mode;
   paint.useCpu = !!mode; // (see paint.frame)
   S.size = '';
@@ -2084,7 +2128,7 @@ function brushMove(e) {
 // ---------------------------------------------------------------------------
 // Input
 
-canvas.addEventListener('pointerdown', (e) => {
+onBoard('pointerdown', (e) => {
   if (e.button !== 0 || !e.isPrimary) return;
   // (On the title screen a tap enters and a hold or drag paints.)
   if (S.key === 'intro' && reduce.matches) return enter({ x: e.clientX, y: e.clientY });
@@ -2099,12 +2143,12 @@ source.addEventListener('pointerdown', (e) => {
   // (The brush paints only the board; a touch on a card with parts may be a flick, to turn it.)
   if (e.pointerType !== 'mouse' && e.target.closest('section.paged')) startBrush(e, true);
 });
-for (const el of [canvas, source]) {
-  el.addEventListener('pointermove', (e) => {
+for (const on of [onBoard, (type, fn) => source.addEventListener(type, fn)]) {
+  on('pointermove', (e) => {
     if (e.isPrimary && brushMove(e) && S.brush?.painting) e.preventDefault();
   });
   for (const type of ['pointerup', 'pointercancel']) {
-    el.addEventListener(type, (e) => {
+    on(type, (e) => {
       const b = S.brush;
       if (!b || b.id !== e.pointerId) return;
       // A quick flick across a card with parts turns to the next or previous part.
@@ -2125,8 +2169,8 @@ for (const el of [canvas, source]) {
     });
   }
 }
-canvas.addEventListener('lostpointercapture', (e) => S.brush && S.brush.id === e.pointerId && dropBrush());
-canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+onBoard('lostpointercapture', (e) => S.brush && S.brush.id === e.pointerId && dropBrush());
+onBoard('contextmenu', (e) => e.preventDefault());
 window.addEventListener('blur', dropBrush);
 
 for (const n of nav) {
@@ -2147,8 +2191,8 @@ for (const t of themeSwitches()) t.addEventListener('click', toggleTheme);
 // A click on the board (a quick press: not a hold or drag, which paint) moves the page to its
 // next colour combo, rippling out from the click.
 let pressedAt = null;
-canvas.addEventListener('pointerdown', (e) => (pressedAt = [e.clientX, e.clientY]));
-canvas.addEventListener('click', (e) => {
+onBoard('pointerdown', (e) => (pressedAt = [e.clientX, e.clientY]));
+onBoard('click', (e) => {
   if (S.key === 'intro' || performance.now() - (S.paintedAt || 0) < 300) return;
   if (pressedAt && Math.hypot(e.clientX - pressedAt[0], e.clientY - pressedAt[1]) > 8) return; // (a drag)
   pulseCombo({ x: e.clientX, y: e.clientY });
@@ -2174,8 +2218,17 @@ watchCodes({ konami: playBadApple });
 for (const btn of $$('.ascii-btn')) btn.addEventListener('click', toggleAscii);
 $('#apple-toggle').addEventListener('click', playBadApple);
 
+// The flaps' sound: off unless asked for (M), and only ever started by a key or a tap.
+const sound = new FlapSound({ variant: 'snap', volume: 0.35 });
+addEventListener('pointerdown', () => sound.gesture(), true);
+addEventListener('keydown', () => sound.gesture(), true);
+
 window.addEventListener('keydown', (e) => {
   if (e.altKey || e.ctrlKey || e.metaKey) return;
+  if ((e.key === 'm' || e.key === 'M') && !e.repeat && !e.target.closest?.('input, textarea, select, [contenteditable]')) {
+    sound.toggle();
+    return;
+  }
   if (e.key === 'D' && e.shiftKey) { // (Shift+D: the design panel, for reviewing the palettes)
     options.toggle();
     return;
@@ -2237,6 +2290,9 @@ window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => build(false), 120);
 });
+// (The pixel ratio can change with no resize, e.g. on a window moved to another screen.)
+const watchRatio = () => matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`).addEventListener('change', () => (build(false), watchRatio()), { once: true });
+watchRatio();
 
 const keyFromHash = () => {
   const h = location.hash.slice(1);
@@ -2245,8 +2301,10 @@ const keyFromHash = () => {
 window.addEventListener('popstate', () => go(keyFromHash() || 'intro', { push: false }));
 
 /** ASCII mode (the header's >_ button): the board ripples out from the middle into coloured characters (or back). */
+let asciiWait = 0;
 function toggleAscii() {
-  if (pendingApply || goingTo || S.overlay || S.sweep) return void setTimeout(toggleAscii, 250); // (once the running transition is done)
+  // (Once the running transition is done: clicks meanwhile ask for it once, not once each.)
+  if (pendingApply || goingTo || S.overlay || S.sweep) return void (asciiWait ||= setTimeout(() => ((asciiWait = 0), toggleAscii()), 250));
   const on = !S.ascii;
   // The new switches start out showing the board as it was; the ripple turns them over into the
   // new look (and size).
@@ -2374,6 +2432,11 @@ function loop(now) {
     b.lastSplash = now;
   }
   board.tick(now);
+  board.render(now);
+  if (board.landed) {
+    sound.land(board.landed, (board.landX / board.landed / board.W) * 2 - 1);
+    board.landed = board.landX = 0;
+  }
   requestAnimationFrame(loop);
 }
 

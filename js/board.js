@@ -133,6 +133,16 @@ export class Board {
     this.shades.set(this.gapColor, { shade, k });
   }
 
+  /** A board of very many small switches: on it the fine touches of a flip (the hinge and edge
+   *  lines, the cast shadow and the gleam) can't be seen, and cost the most. */
+  get fine() {
+    return this.cells.length > 4000;
+  }
+  /** Whether a flip draws its hinge and edge lines (invisible on tiny flaps). */
+  get lines() {
+    return this.cw >= 12 && !this.fine;
+  }
+
   /** Grid geometry for a viewport, in device pixels. Pure, so layouts can try several sizes.
    *  The flaps always cover the whole screen: when they don't tile exactly, the outermost
    *  columns are cut evenly at both sides and the last row runs off the bottom edge.
@@ -251,10 +261,15 @@ export class Board {
     const x = (this.atlasN % cols) * sw + 1;
     const y = Math.floor(this.atlasN / cols) * sh + 1;
     this.atlasN++;
-    this.atlas.getContext('2d').drawImage(this.glyphCanvas(f, gm), x, y);
     g = { c: this.atlas, x, y };
+    this.place(this.glyphCanvas(f, gm), g);
     this.glyphCache.set(f.gk, g);
     return g;
+  }
+
+  /** Put a picture into its slot in the atlas. */
+  place(pic, g) {
+    g.c.getContext('2d').drawImage(pic, g.x, g.y);
   }
 
   /** Draw a face's picture once (see glyph). */
@@ -529,11 +544,9 @@ export class Board {
       const p = Math.min(1, Math.max(0, (now - a.t0) / a.dur));
       // How far the top flap has turned over its hinge (0 … π), with the hinge and the flap's
       // edge drawn.
-      // (On a board of many small switches the fine touches can't be seen, and cost the most.)
-      const fine = this.cells.length > 4000;
-      const lines = this.cw >= 12 && !fine; // (the hinge and edge lines: invisible on tiny flaps)
+      const lines = this.lines;
       const theta = Math.PI * this.turn(p);
-      const cast = !fine; // (the falling flap's shadow on the half below it)
+      const cast = !this.fine; // (the falling flap's shadow on the half below it)
       const sh = this.shades.get(s.gap || this.gapColor) || { shade: this.shade, k: this.shadeK };
       const shade = sh.shade;
       const k = sh.k * 1.15;
@@ -604,7 +617,7 @@ export class Board {
     for (const c of this.cells) {
       const stale = c.gap && c.gap !== this.gapColor;
       c.gap = null;
-      if (stale && !c.anim) this.draw(c, now);
+      if (stale) c.anim ? this.touch(c) : this.draw(c, now);
     }
   }
 
@@ -686,6 +699,29 @@ export class Board {
     const p = Math.min(1, Math.max(0, (now - a.t0) / a.dur));
     a.dur = ms / (1 - p);
     a.t0 = now - p * a.dur;
+    this.touch(s);
+  }
+
+  /** A flip in motion was changed in place (its timing, or its gutter). Here nothing to do: a
+   *  turning flap is redrawn every frame or so anyway (see redraws). */
+  touch(s) {}
+
+  /** Whether tick redraws a switch this frame: one that changed, and one still turning (with very
+   *  many turning, each only every `every`th frame). */
+  redraws(s, changed, every) {
+    return changed || (s.anim && (s.i + this.tickNo) % every === 0);
+  }
+
+  /** Put the frame on screen. Here nothing to do: a switch is drawn as soon as it changes. */
+  render(now) {}
+
+  /** A copy of the board as it is on screen, as a picture to cut slices from. */
+  capture() {
+    const c = document.createElement('canvas');
+    c.width = this.canvas.width;
+    c.height = this.canvas.height;
+    c.getContext('2d').drawImage(this.canvas, 0, 0);
+    return c;
   }
 
   /** Drop the flips still waiting (one in motion carries on). */
@@ -706,6 +742,9 @@ export class Board {
         s.cur = done.to;
         s.anim = null;
         changed = true;
+        // (Counted for the sound: how many landed this frame, and where.)
+        this.landed = (this.landed || 0) + 1;
+        this.landX = (this.landX || 0) + s.x;
         if (s.q.length) s.at = Math.max(s.at, now + s.q[0].w);
         if (done.then) {
           done.then();
@@ -744,7 +783,7 @@ export class Board {
         if (p >= 1) s.caAnim = null;
         changed = true;
       }
-      if (changed || (s.anim && (s.i + this.tickNo) % every === 0)) this.draw(s, now);
+      if (this.redraws(s, changed, every)) this.draw(s, now);
       if (!s.anim && !s.q.length && !s.caAnim) this.active.delete(s);
     }
   }

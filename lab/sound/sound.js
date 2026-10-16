@@ -41,12 +41,12 @@ const SPRITE = { file: '../assets/sound/pragotron-ticks.mp3', count: 20, lead: 0
  * `rateJit`: playback rate ± (so repeats differ).
  */
 const DENSITY = {
-  knee: 1e9, exp: 0.45, cmax: 70, ref: 10, fall: 0.25, cluster: 0, clusterMs: [2, 7], clusterDb: [-8, -3],
-  spread: 8, skew: 1.6, makeup: 2.5, rateJit: 0.035, maxVoices: 160, perFrame: 24, landDb: 2,
+  knee: 1e9, exp: 0.45, cmax: 70, ref: 10, fall: 0.35, cluster: 0, clusterMs: [2, 7], clusterDb: [-8, -3],
+  spread: 14, skew: 1.3, makeup: 4, rateJit: 0.035, maxVoices: 160, perFrame: 6, landDb: 2,
 };
 // `length`: every tick drawn out this many times longer, at the same pitch (its click kept as it
 // is, its ring and decay stretched); `pitch`: semitones up or down, at the same length.
-const CHAIN = { pan: 0.35, hpF: 180, masterLp: 15000, shelfF: 6000, shelfDb: 0, glueThr: -18, glueRatio: 2, level: 0, length: 1.18, pitch: 0 };
+const CHAIN = { pan: 0.35, hpF: 180, masterLp: 15000, shelfF: 6000, shelfDb: 0, glueThr: -18, glueRatio: 2, level: 0, length: 2.5, pitch: -5 };
 
 /**
  * The 'metal' tick (an aluminium leaf striking its stop, on a plastic frame). Times in ms,
@@ -84,7 +84,7 @@ const SNAP = {
 };
 
 export const VARIANTS = {
-  pragotron: { kind: 'sample', ...CHAIN, ...DENSITY, rateJit: 0.05, level: 0, hpF: 200, shelfDb: -1.5, room: 0.3 },
+  pragotron: { kind: 'sample', ...CHAIN, ...DENSITY, rateJit: 0.05, level: 0, hpF: 200, shelfDb: -1.5, room: 0.7 },
   snap: { kind: 'snap', ...SNAP, ...CHAIN, ...DENSITY, rateJit: 0.02, level: -1 },
   metal: { kind: 'metal', ...METAL, ...CHAIN, ...DENSITY, shelfDb: -2, level: -2.5 },
 };

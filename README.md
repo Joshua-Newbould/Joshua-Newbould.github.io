@@ -58,6 +58,7 @@ screen is cool silver and white.
 | File | Role |
 | --- | --- |
 | `js/board.js` | The canvas board: identical flaps, flip animation, timing, gutters, batched drawing (`hold`/`release`) |
+| `js/glboard.js` | The same board drawn by the GPU (WebGL2): one draw call a frame, pixel for pixel the 2D look |
 | `js/paint.js` | The background (three modes): a WebGL shader, or the same field in JavaScript without a GPU |
 | `js/design.js` | Colour schemes, the design variations and the options panel |
 | `js/main.js` | Layout and parts, section snapshots, transitions, theme switch, brush and input |
@@ -71,7 +72,9 @@ switches and plenty of board around a smaller card.
 
 Without a usable GPU (software WebGL, or frames that can't keep up) the site runs lighter: the
 background is computed in JavaScript at one sample per switch, switches are a little bigger,
-and the board redraws at a lower resolution.
+and the board redraws at a lower resolution. The board itself is drawn with WebGL2 wherever
+there is a real GPU, and on a 2D canvas otherwise (or with `?gl=0`); if the GPU is lost for
+good mid-visit, the 2D board takes over.
 
 For a transition each visible section is rendered to an image (an SVG `foreignObject`
 with the page's own CSS and fonts), cut into one slice per flap and flipped in a wave; the
