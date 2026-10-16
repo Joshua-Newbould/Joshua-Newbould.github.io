@@ -412,6 +412,13 @@ html.brush-on main section,
 html.brush-on #intro {
   cursor: crosshair;
 }
+/* (A drag that paints mustn't be taken by a touch screen as a scroll.) */
+html.brush-on #intro,
+html.brush-on #site > header,
+html.brush-on #site > footer,
+html.brush-on main section {
+  touch-action: pinch-zoom;
+}
 
 .js .theme-switch,
 .theme-switch {

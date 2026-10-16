@@ -1514,6 +1514,8 @@ function toggleTheme(e) {
   S.wantDark = !(S.wantDark ?? S.dark);
   // Copy the bars as they are (usually already cached), before the switch moves: the copy
   // covers the old bars until the ripple passes, with a hole where the live switch shows.
+  // (A bar the brush has turned into switches comes back first, so it gets its copy too.)
+  restoreBrushBoxes(true);
   const bars = [headerEl(), footerEl()].filter((el) => !el.closest('[hidden]') && el.style.opacity !== '0');
   const barShots = reduce.matches ? null : bars.map((el) => snapshot(el));
   // The switch answers at once; the page follows in the ripple.
@@ -1861,17 +1863,17 @@ function restoreBrushBoxes(force = false) {
  * go on showing what the switch showed (its colour, or a section's text), so a stroke's edge is
  * softer. Their gutters match what they are over (`gap`).
  */
-function brushPath(s, mask, gap) {
+function brushPath(s, mask, gap, onSection = false) {
   const pal = scheme().brush;
   const base = concrete(s.abs, s.i);
-  const c = () => (S.small === 'ascii' ? Object.assign(glyph(pick('#@%*'), pick(pal), ASCII_FACE, 600), { avg: pal[0] }) : brushMosaic(pal, mask, base, gap));
+  const c = () => (S.small === 'ascii' ? Object.assign(glyph(pick('#@%*'), pick(pal), ASCII_FACE, 600), { avg: pal[0] }) : brushMosaic(pal, mask, base, gap, onSection));
   return [c(), { f: c(), w: 220 + rand() * 260 }, ...Array.from({ length: randInt(1, 3) }, c)];
 }
 
 // The brushed pieces' characters, by palette, pieces covered and gutter colour (a few variants
 // of each): their pictures are drawn once and shared; what shows through differs per switch.
 const brushTiles = new Map();
-function brushMosaic(pal, mask, base, gap) {
+function brushMosaic(pal, mask, base, gap, onSection) {
   const key = `${pal.join()}|${mask}|${gap}|${randInt(0, mask === 15 ? 11 : 3)}`;
   let tiles = brushTiles.get(key);
   if (!tiles) {
@@ -1879,7 +1881,8 @@ function brushMosaic(pal, mask, base, gap) {
     tiles = Array.from({ length: 4 }, (_, k) => (mask & (1 << k) ? { ch: pick('#@%*+='), fg: pick(pal) } : null));
     brushTiles.set(key, tiles);
   }
-  return Object.assign(mosaic(tiles, 2, 2, ASCII_FACE, gap, key, mask === 15 ? null : base), { avg: faceColour(base) });
+  // (On a section every piece keeps the section under it, so each little flap falls on its own.)
+  return Object.assign(mosaic(tiles, 2, 2, ASCII_FACE, gap, key, mask === 15 && !onSection ? null : base), { avg: faceColour(base) });
 }
 
 const BRUSH_R = 1.15; // the brush's radius, in normal switch widths
@@ -1923,7 +1926,7 @@ function splash(x, y, again = false) {
       const box = boxAtCell(j);
       if (box) {
         // (Over a section the switches stay bare, as the section is: no board gutters round them.)
-        brushBox(box, () => board.flip(s, concrete(s.abs, s.i), { delay: delay + 50, steps: brushPath(s, mask, cardBg(box)), stepDur: 85, dur: 190 }));
+        brushBox(box, () => board.flip(s, concrete(s.abs, s.i), { delay: delay + 50, steps: brushPath(s, mask, cardBg(box), true), stepDur: 85, dur: 190 }));
         continue;
       }
       if (isPaint(s.abs)) rememberPaint(s);
@@ -2066,8 +2069,11 @@ nextBtn.addEventListener('click', () => step(1, centreOf(nextBtn)));
 for (const t of themeSwitches()) t.addEventListener('click', toggleTheme);
 // With the brush off, a click on the board (not a drag or paint stroke) moves the page to its
 // next colour combo, rippling out from the click.
+let pressedAt = null;
+canvas.addEventListener('pointerdown', (e) => (pressedAt = [e.clientX, e.clientY]));
 canvas.addEventListener('click', (e) => {
   if (S.brushOn || S.key === 'intro' || performance.now() - (S.paintedAt || 0) < 300) return;
+  if (pressedAt && Math.hypot(e.clientX - pressedAt[0], e.clientY - pressedAt[1]) > 8) return; // (a drag)
   pulseCombo({ x: e.clientX, y: e.clientY });
 });
 // The brush and ASCII mode each have a button in the header and one on the title screen.

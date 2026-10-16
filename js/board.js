@@ -256,6 +256,107 @@ export class Board {
     return c;
   }
 
+  /** What a face shows under the brush's little flaps (itself, if it isn't a brushed one). */
+  static under(f) {
+    return f.t === 'mosaic' ? f.base : f;
+  }
+
+  /** A flip between brushed faces over the same thing (or to and from that thing itself). */
+  tiled(a) {
+    if (a.from.t !== 'mosaic' && a.to.t !== 'mosaic') return false;
+    const u = Board.under(a.from);
+    return !!u && u === Board.under(a.to);
+  }
+
+  /** Rows [py, py+ph) of one little flap's piece of a face (columns tx…tx+tw, rows from ty), into
+   *  the band [dy, dy+dh) at column dx: what is under it, then the brush's character if it has one. */
+  tilePart(f, k, tx, ty, tw, py, ph, dx, dy, dh) {
+    if (dh < 0.5 || ph <= 0) return;
+    const ctx = this.ctx;
+    const u = Board.under(f);
+    if (u.t === 'slice') {
+      ctx.fillStyle = u.bg || this.gapColor;
+      ctx.fillRect(dx, dy, tw, dh);
+      ctx.drawImage(u.src.canvas, u.sx + tx, u.sy + ty + py, tw, ph, dx, dy, tw, dh);
+    } else {
+      ctx.fillStyle = u.bg;
+      ctx.fillRect(dx, dy, tw, dh);
+    }
+    if (f.t === 'mosaic' && f.tiles[k]) ctx.drawImage(this.glyphCanvas(f, this.gm), tx, ty + py, tw, ph, dx, dy, tw, dh);
+  }
+
+  /** A bare flap whose brushed pieces each fall from one face to the next while the rest stays. */
+  drawTiles(s, a, now) {
+    const ctx = this.ctx;
+    const { fw, fh } = this.gm;
+    const { x, y } = s;
+    const u = Board.under(a.to);
+    // What doesn't move: the piece of the section, edge to edge as a bare flap is (and beyond
+    // the section's right or bottom edge, the gutter, as around the real section).
+    let w = this.cw;
+    let h = this.ch;
+    if (u.t === 'slice') {
+      w = Math.max(0, Math.min(this.cw, u.src.canvas.width - u.sx));
+      h = Math.max(0, Math.min(this.ch, u.src.canvas.height - u.sy));
+    }
+    ctx.fillStyle = this.gapColor;
+    if (w < this.cw || h < this.ch) ctx.fillRect(x, y, this.cw, this.ch);
+    ctx.fillStyle = u.bg || this.gapColor;
+    ctx.fillRect(x, y, w, h);
+    if (u.t === 'slice' && w && h) ctx.drawImage(u.src.canvas, u.sx, u.sy, w, h, x, y, w, h);
+    const p = Math.min(1, Math.max(0, (now - a.t0) / a.dur));
+    const q = p ** 1.3;
+    const theta = Math.PI * q * q * (3 - 2 * q);
+    const sh = this.shades.get(s.gap || this.gapColor) || { shade: this.shade, k: this.shadeK };
+    const k = sh.k * 1.15;
+    const m = a.to.t === 'mosaic' ? a.to : a.from;
+    for (let j = 0; j < m.ny; j++) {
+      for (let i = 0; i < m.nx; i++) {
+        const t = j * m.nx + i;
+        const from = a.from.t === 'mosaic' ? a.from.tiles[t] : null;
+        const to = a.to.t === 'mosaic' ? a.to.tiles[t] : null;
+        const tx = Math.round((i * fw) / m.nx);
+        const ty = Math.round((j * fh) / m.ny);
+        const tw = Math.round(((i + 1) * fw) / m.nx) - tx;
+        const th = Math.round(((j + 1) * fh) / m.ny) - ty;
+        const dx = x + tx;
+        const dy = y + ty;
+        if (!from && !to) continue; // (untouched: the section shows)
+        if (p >= 1) {
+          this.tilePart(a.to, t, tx, ty, tw, 0, th, dx, dy, th);
+          continue;
+        }
+        // The little flap's fall, as a whole switch falls.
+        const thy = Math.round(th / 2);
+        const tbh = th - thy;
+        this.tilePart(a.to, t, tx, ty, tw, 0, thy, dx, dy, thy);
+        this.tilePart(a.from, t, tx, ty, tw, thy, tbh, dx, dy + thy, tbh);
+        ctx.fillStyle = sh.shade;
+        if (theta < Math.PI / 2) {
+          const sc = Math.cos(theta);
+          const h = thy * sc;
+          this.tilePart(a.from, t, tx, ty, tw, 0, thy, dx, dy + thy - h, h);
+          ctx.fillStyle = sh.shade;
+          ctx.globalAlpha = k * 0.5 * (1 - sc);
+          ctx.fillRect(dx, dy + thy - h, tw, h);
+          ctx.globalAlpha = k * 0.3 * sc;
+          ctx.fillRect(dx, dy, tw, thy - h);
+        } else {
+          const sc = -Math.cos(theta);
+          const h = tbh * sc;
+          ctx.globalAlpha = k * 0.28 * (1 - sc);
+          ctx.fillRect(dx, dy + thy, tw, tbh);
+          ctx.globalAlpha = 1;
+          this.tilePart(a.to, t, tx, ty, tw, thy, tbh, dx, dy + thy, h);
+          ctx.fillStyle = sh.shade;
+          ctx.globalAlpha = k * 0.4 * (1 - sc);
+          ctx.fillRect(dx, dy + thy, tw, h);
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
   /** Draw rows [py, py+ph) of a face into the destination band [dy, dy+dh) at column x. */
   drawPart(f, gm, x, py, ph, dy, dh) {
     if (dh < 0.5 || ph <= 0) return;
@@ -279,6 +380,9 @@ export class Board {
     const ctx = this.ctx;
     const a = s.anim;
     const ca = s.ca ?? 1; // how much of the flap's edges (gutter, corners, hinge) show
+    // On a section (a bare flap) the brush's little flaps fall on their own, over the section,
+    // and the pieces it hasn't touched don't move: the switch as a whole never flips.
+    if (a && ca === 0 && this.tiled(a)) return this.drawTiles(s, a, now);
     if (!a && ca < 1) {
       // A "bare" flap: its face covers the whole cell, edges faded in by `ca`, so a grid of
       // bare flaps showing slices of a picture is that picture, seamless.
