@@ -44,13 +44,14 @@
    ========================================================================== */
 
 :root {
-  --surface: #f7f4ef;
-  --bar: #f1ede6;
-  --line: #ddd6cb;
-  --text: #2b2520;
-  --soft: #4a433c;
-  --muted: #7a7168;
-  --accent: #9a5a2c;
+  /* (the title screen's cool silver, light theme: every pair passes WCAG AA) */
+  --surface: #f4f7fc;
+  --bar: #ecf1f7;
+  --line: #d1d8e1;
+  --text: #192029;
+  --soft: #3b434d;
+  --muted: #636a72;
+  --accent: #414853;
   --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --display: "Space Grotesk", "Inter Tight", "Helvetica Neue", Arial, sans-serif;
   --display-weight: 700;
@@ -372,7 +373,8 @@ html:not(.js) .foot-tools {
   flex-shrink: 0;
 }
 #brush-toggle,
-#card-toggle {
+#card-toggle,
+.secret-btn {
   display: grid;
   place-items: center;
   width: 26px;
@@ -383,7 +385,8 @@ html:not(.js) .foot-tools {
   color: var(--muted);
 }
 #brush-toggle svg,
-#card-toggle svg {
+#card-toggle svg,
+.secret-btn svg {
   width: 14px;
   height: 14px;
 }
@@ -398,27 +401,45 @@ html:not(.js) .foot-tools {
   stroke: currentColor;
   stroke-width: 1.4;
 }
+.secret-btn svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* The secrets' buttons only on touch screens (elsewhere the codes are typed). */
+.js .secret-btn {
+  display: none;
+}
+.js[data-vp~="touch"] .secret-btn {
+  display: grid;
+}
 #brush-toggle .bt-tip {
   fill: currentColor;
 }
 #brush-toggle:hover,
-#card-toggle:hover {
+#card-toggle:hover,
+.secret-btn:hover {
   color: var(--text);
 }
 #brush-toggle[aria-pressed="true"],
-#card-toggle[aria-pressed="true"] {
+#card-toggle[aria-pressed="true"],
+.secret-btn[aria-pressed="true"] {
   background: var(--text);
   color: var(--surface);
   box-shadow: none;
 }
 #brush-toggle:focus-visible,
-#card-toggle:focus-visible {
+#card-toggle:focus-visible,
+.secret-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 @media (prefers-reduced-motion: no-preference) {
   #brush-toggle,
-  #card-toggle {
+  #card-toggle,
+  .secret-btn {
     transition: background 0.2s, color 0.2s;
   }
 }
@@ -502,6 +523,8 @@ html.brush-on main section {
 .w-fit {
   display: block;
 }
+/* Read out by screen readers, not shown. */
+.sr-only,
 .js main h2 {
   position: absolute;
   width: 1px;
@@ -1153,6 +1176,7 @@ html:not(.js) #enter,
 html:not(.js) .theme-switch,
 html:not(.js) #brush-toggle,
 html:not(.js) #card-toggle,
+html:not(.js) .secret-btn,
 html:not(.js) .foot-nav {
   display: none;
 }
@@ -1209,4 +1233,10 @@ html:not(.js) .pub-authors,
 html:not(.js) .pub-venue,
 html:not(.js) footer {
   color: var(--muted);
+}
+
+/* While Bad Apple!! plays on the board (the Konami code), the page steps aside. */
+.playing #source,
+.playing .card-shadow {
+  visibility: hidden;
 }

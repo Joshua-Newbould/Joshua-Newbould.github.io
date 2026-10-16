@@ -183,8 +183,13 @@ export class Paint {
     if (!gl) return;
     // Software-emulated WebGL (SwiftShader, llvmpipe, Microsoft's basic renderer) is slower
     // than the JavaScript field: treat it as no GPU.
-    const info = gl.getExtension('WEBGL_debug_renderer_info');
-    const renderer = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    // (Firefox names the real renderer plainly and warns about the debug extension; Chrome only
+    // through the extension.)
+    let renderer = String(gl.getParameter(gl.RENDERER));
+    if (/^webkit webgl$/i.test(renderer)) {
+      const info = gl.getExtension('WEBGL_debug_renderer_info');
+      if (info) renderer = String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL));
+    }
     if (/swiftshader|llvmpipe|softpipe|software|basic render/i.test(renderer) && !/[?&]gpu\b/.test(location.search)) return;
     const sh = (type, src) => {
       const s = gl.createShader(type);
@@ -291,8 +296,6 @@ export class Paint {
     const mix3 = (a, b, f) => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
     const seed = this.seed;
     const mode = this.mode;
-    const relief = scheme.relief ?? 0.35;
-    const spec = scheme.spec ?? 0.1;
     const field = (x, y) => {
       if (mode === 1) {
         const v = fbm(x * 1.25 + t * 0.35, y * 1.25 - t * 0.22) * 6.5 + 2.5 + seed;
@@ -327,13 +330,10 @@ export class Paint {
       return { c, h: 0.3 * ridge + 0.1 * Math.hypot(rx, ry) };
     };
     const { cols, rows } = this;
-    const lit = false; // (the lighting would need two more samples per flap: too costly without a GPU)
+    // (No lighting here: it needs two more samples per flap, too costly without a GPU.)
     const W = cols * this.cwCss;
     const H = rows * this.chCss || 1;
     const k = 0.95 / H;
-    const ll = Math.hypot(-0.5, 0.62, 0.72);
-    const [lx, ly, lz] = [-0.5 / ll, 0.62 / ll, 0.72 / ll];
-    const hl = Math.hypot(lx, ly, lz + 1);
     // The pattern is smooth and large: on a big board, compute every second switch each way and
     // fill in between (a quarter of the work).
     const step = cols * rows > 500 ? 2 : 1;
@@ -345,24 +345,9 @@ export class Paint {
       for (let col = 0; col < cols; col++) {
         if (!on(col, cols - 1)) continue;
         const x = ((col + 0.5) * this.cwCss - W / 2) * k;
-        const { c, h } = field(x, y);
-        let out = c;
-        // The lighting needs two more samples per flap: only where the board is small.
-        if (lit && mode !== 2) {
-          const e = 0.02;
-          let nx = ((h - field(x + e, y).h) / e) * 0.06;
-          let ny = ((h - field(x, y + e).h) / e) * 0.06;
-          const nl = Math.hypot(nx, ny, 1);
-          nx /= nl;
-          ny /= nl;
-          const nz = 1 / nl;
-          const diff = Math.max(nx * lx + ny * ly + nz * lz, 0);
-          const sp = Math.max((nx * lx + ny * ly + nz * (lz + 1)) / hl, 0) ** 30;
-          const shade = 1 + (0.72 + 0.36 * diff - 1) * relief;
-          out = c.map((v) => v * shade + spec * sp);
-        }
+        const { c } = field(x, y);
         const o = (row * cols + col) * 3;
-        for (let n = 0; n < 3; n++) rgb[o + n] = Math.min(1, out[n]) * 255;
+        for (let n = 0; n < 3; n++) rgb[o + n] = Math.min(1, c[n]) * 255;
       }
     }
     if (step > 1) {

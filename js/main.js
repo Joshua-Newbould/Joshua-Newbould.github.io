@@ -4,8 +4,9 @@
 // again. Everything here is built for that: the board (board.js), the background (paint.js),
 // the design system and its variations (design.js), and the transitions below.
 
-import { Board, blank, solid, source as imageSource, slice } from './board.js';
+import { Board, solid, glyph, source as imageSource, slice } from './board.js';
 import { Paint } from './paint.js';
+import { watchCodes, rampChar, luma } from './secrets.js';
 import { loadLook, saveLook, scheme as makeScheme, gutter, bgMode, mountOptions, COMBOS, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
@@ -40,6 +41,7 @@ const themeSwitches = () => $$('.theme-switch'); // the header's, and the title 
 /** The theme switch on screen now. */
 const liveSwitch = () => (S.key === 'intro' ? $('#intro-theme') : themeToggle);
 const brushToggle = $('#brush-toggle');
+const touchy = matchMedia('(hover: none), (pointer: coarse)'); // a touch screen first (no keyboard for the secret codes)
 const cardToggle = $('#card-toggle');
 const prevBtn = $('[data-board="prev"]');
 const nextBtn = $('[data-board="next"]');
@@ -134,6 +136,9 @@ function showPart(pg) {
   const focused = document.activeElement;
   prev.disabled = pg.part === 0;
   next.disabled = pg.part === parts.length - 1;
+  $('.pg-num', pg.pager).setAttribute('aria-label', `Part ${pg.part + 1} of ${parts.length}`);
+  prev.setAttribute('aria-label', prev.disabled ? 'Previous part' : `Previous part (${pg.part} of ${parts.length})`);
+  next.setAttribute('aria-label', next.disabled ? 'Next part' : `Next part (${pg.part + 2} of ${parts.length})`);
   // A pager arrow that has just run out hands keyboard focus to the other one.
   if (focused === prev && prev.disabled && !next.disabled) next.focus({ preventScroll: true });
   if (focused === next && next.disabled && !prev.disabled) prev.focus({ preventScroll: true });
@@ -165,6 +170,9 @@ const S = {
   brush: null,
   lite: false, // no usable GPU (or too slow): bigger switches, a lighter background
   brushOn: false, // the paint brush works only while its button is on (off on every visit)
+  ascii: false, // the secret ASCII mode (see secrets.js): the background as coloured characters
+  player: null, // Bad Apple!! playing on the board (see badapple.js); 'loading' while it loads
+  small: false, // smaller switches (while Bad Apple plays)
 };
 
 const SPEED = 0.032; // background time per second: a steady drift
@@ -272,12 +280,36 @@ const mixLch = (a, b, t) => {
 const faceAt = (i) => (S.overlay && S.overlay.get(i)) || (S.brushMap && S.brushMap.get(i)) || null;
 const isPaint = (f) => !f;
 
-function paintHex(i) {
-  const k = i * 3;
-  const rgb = S.frame.rgb;
-  return rgbHex(rgb[k], rgb[k + 1], rgb[k + 2]);
+
+/** The face a switch shows for a background colour: the colour itself, or in ASCII mode a
+ *  character for how light it is, in that colour, on a near-black face. */
+function paintFace(r, g, b, ascii = S.ascii) {
+  if (!ascii) return solid(rgbHex(r, g, b));
+  const [lo, hi] = frameLuma();
+  // (Colours rounded to 32 levels a channel, so the characters' bitmaps can be shared.)
+  const q = (v) => Math.min(255, Math.round(v / 8) * 8);
+  const fg = rgbHex(q(r), q(g), q(b));
+  const f = glyph(rampChar((luma(r, g, b) - lo) / Math.max(1, hi - lo)), fg, ASCII_FACE, 600);
+  f.avg = fg; // (blends between faces go by the character's colour, not the black)
+  return f;
 }
-const concrete = (f, i) => f || solid(paintHex(i));
+const ASCII_FACE = '#07090c';
+/** The darkest and lightest background on the board now (characters span the whole range). */
+function frameLuma() {
+  const fr = S.frame;
+  if (!fr.luma) {
+    let lo = 255;
+    let hi = 0;
+    for (let k = 0; k < fr.rgb.length; k += 3) {
+      const l = luma(fr.rgb[k], fr.rgb[k + 1], fr.rgb[k + 2]);
+      if (l < lo) lo = l;
+      if (l > hi) hi = l;
+    }
+    fr.luma = [lo, hi];
+  }
+  return fr.luma;
+}
+const concrete = (f, i) => f || paintFace(S.frame.rgb[i * 3], S.frame.rgb[i * 3 + 1], S.frame.rgb[i * 3 + 2]);
 /** The overall colour of a face, for blending between faces. */
 const faceColour = (f) => f.avg || f.bg;
 
@@ -339,6 +371,7 @@ function retarget(indices, how, force = null) {
     if (c.key === key && !(force && force(i))) continue;
     c.key = key;
     c.abs = abs;
+    if (S.sweep) S.sweep.turned[i] = 1; // (flipped here, so the sweep's front leaves it be)
     if (isPaint(abs)) rememberPaint(c, true);
     const f = concrete(abs, i);
     const opts = how && !reduce.matches ? how(i, f) : null;
@@ -366,19 +399,20 @@ function resetEdges() {
  */
 function cellTarget(w, h) {
   const base = Math.min(24, Math.max(7.5, Math.sqrt(w * h) / (Math.min(w, h) < 640 ? 70 : 58)));
-  return S.lite ? base * 1.3 : base;
+  const t = S.lite ? base * 1.3 : base;
+  return S.small ? Math.max(4, t * (S.lite ? 0.55 : 0.4)) : t;
 }
 
 function build(first) {
   const cssW = document.documentElement.clientWidth || window.innerWidth;
   const cssH = window.innerHeight;
   const dpr = Math.min(window.devicePixelRatio || 1, S.lite ? 1.5 : 2);
-  const size = `${cssW}x${cssH}@${dpr}${S.lite ? 'L' : ''}`;
+  const size = `${cssW}x${cssH}@${dpr}${S.lite ? 'L' : ''}${S.small ? 's' : ''}`;
   if (size === S.size) return;
   S.size = size;
   dropBrush();
   if (!first) cancelWeb(); // a wave's switches belong to the old grid
-  board.gapColor = gutter(S.dark, look, S.key);
+  board.gapColor = boardGutter();
   shadeBoard();
   board.configure(Board.metrics(cssW, cssH, dpr, cellTarget(cssW, cssH), 1.9), solid(board.gapColor));
   paint.resize(board);
@@ -405,6 +439,11 @@ function syncDom() {
   }
   for (const t of themeSwitches()) t.setAttribute('aria-checked', String(S.wantDark ?? S.dark));
   if (!intro) setFooterLabels(S.key);
+  // The window title names the page, and a change of page is read out.
+  const name = intro ? '' : pages[pageIndex(S.key)].name;
+  document.title = name ? `${name} · Joshua Newbould` : 'Joshua Newbould';
+  if (syncDom.shown !== undefined && syncDom.shown !== S.key) $('#announce').textContent = name ? `${name} page` : 'Title screen';
+  syncDom.shown = S.key;
   applyColours();
   layoutWeb();
 }
@@ -462,7 +501,7 @@ function layoutWebBoxes() {
     const w = board.cssW;
     const h = board.cssH;
     const short = h <= 560 && w > h;
-    document.documentElement.dataset.vp = [w < 640 && 'phone', (w >= 1000 || (w >= 800 && short)) && 'wide', short && 'short'].filter(Boolean).join(' ');
+    document.documentElement.dataset.vp = [w < 640 && 'phone', (w >= 1000 || (w >= 800 && short)) && 'wide', short && 'short', touchy.matches && 'touch'].filter(Boolean).join(' ');
   }
   const dpr = board.dpr;
   const cw = board.cw / dpr;
@@ -669,7 +708,6 @@ function fitCard(pg, fits, cap, room, phone) {
 let morphToken = 0;
 let goingTo = null; // where a running transition is heading
 let pendingApply = null; // a transition's switch to its next screen, until it has happened
-let themeRippling = false; // the running transition is a theme ripple
 
 const toDataUrl = (blob) =>
   new Promise((res) => {
@@ -795,7 +833,7 @@ function renderSnapshot(el) {
   }
 }
 
-/** Faces showing a snapshot cut into one slice per switch (each with its average colour). */
+/** Faces showing a snapshot cut into one slice per switch (each blending as the card's surface). */
 function slicesOf(shot, bgHex) {
   if (!shot) return new Map();
   shot.slices ||= new Map();
@@ -811,17 +849,9 @@ function slicesOf(shot, bgHex) {
   const r0 = (a / board.cols) | 0;
   const nc = (b % board.cols) - c0 + 1;
   const nr = ((b / board.cols) | 0) - r0 + 1;
-  const small = document.createElement('canvas');
-  small.width = nc;
-  small.height = nr;
-  const sx = small.getContext('2d', { willReadFrequently: true });
-  sx.imageSmoothingQuality = 'high';
-  sx.drawImage(shot.canvas, 0, 0, nc * board.cw, nr * board.ch, 0, 0, nc, nr);
-  const px = sx.getImageData(0, 0, nc, nr).data;
   for (let r = 0; r < nr; r++) {
     for (let c = 0; c < nc; c++) {
       const f = slice(src, c * board.cw, r * board.ch, bgHex);
-      const k = (r * nc + c) * 4;
       f.avg = bgHex; // blends lean on the card's surface, not its ink (no grey tiles)
       out.set((r0 + r) * board.cols + c0 + c, f);
     }
@@ -1176,7 +1206,26 @@ async function boxesToSwitches(boxes, keep = null) {
  * The header and footer colours and the card's shadow follow the same front.
  * A second navigation mid-wave simply redirects it from wherever the switches are.
  */
-async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = null } = {}) {
+/** Run a transition; if anything in it fails, the page still ends up showing, just without the wave. */
+const safely = (run) =>
+  async function (...args) {
+    const running = run.apply(this, args);
+    const token = morphToken; // (each run takes a new token before its first wait)
+    try {
+      return await running;
+    } catch (err) {
+      console.error('Transition failed', err);
+      if (token !== morphToken) return; // (a newer transition has taken over: it finishes)
+      pendingApply?.();
+      if (themeWanted()) {
+        applyTheme(S.wantDark);
+        syncDom();
+      }
+      finishWeb();
+    }
+  };
+
+const webGo = safely(async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = null } = {}) {
   const token = ++morphToken;
   const fromKey = S.key;
   // Until the next screen is applied, a cancel (theme switch, resize) applies it straight away.
@@ -1185,7 +1234,6 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
     go();
   };
   pendingApply = apply;
-  themeRippling = false;
   // Flipping to another part of the same card leaves the header and footer alone.
   const samePage = fromKey === toKey;
   const barsSweep = fromKey !== 'intro' && toKey !== 'intro' && !fromNothing && !samePage;
@@ -1268,12 +1316,11 @@ async function webGo(go, { dir = 1, toKey = null, fromNothing = false, origin = 
   await wait(Math.min(span + land + 220, 3200));
   if (token !== morphToken) return;
   finishWeb();
-}
+});
 
 /** End (or cut short) a transition: real sections visible, the board back to plain background. */
 function finishWeb() {
   goingTo = null;
-  themeRippling = false;
   clearThemeVeil();
   for (const el of [introEl, headerEl(), footerEl(), ...pages.map((p) => p.el)]) el.style.opacity = '';
   S.overlay = null;
@@ -1308,6 +1355,7 @@ function cancelWeb({ keepTheme = false } = {}) {
 }
 
 function go(key, { dir = 1, push = true, origin = null } = {}) {
+  if (S.player) stopBadApple(); // (Back or Forward while Bad Apple plays: it stops first)
   if (!key || key === (goingTo ?? S.key) || !board.cells.length) return;
   const from = S.key;
   dropBrush();
@@ -1380,16 +1428,20 @@ const themeWanted = () => S.wantDark != null && S.wantDark !== S.dark;
 /** The board's gutter colour for the current page and theme; switches keep theirs until a wave reaches them. */
 function retintGutter() {
   const old = board.gapColor;
-  board.gapColor = gutter(S.dark, look, S.key);
+  board.gapColor = boardGutter();
   shadeBoard();
   if (old !== board.gapColor) for (const c of board.cells) c.gap = c.gap || old;
+}
+
+/** The gutter between switches (in ASCII mode, near-black with a hint of the page's colour). */
+function boardGutter() {
+  return S.ascii ? oklchHex(S.dark ? 0.1 : 0.13, 0.02, boardHue(S.key, look)) : gutter(S.dark, look, S.key);
 }
 
 /** The flip's shading takes a deep tint of the page's colour (pure black muddies pastels). */
 function shadeBoard() {
   const hue = boardHue(S.key, look);
-  board.shade = S.dark ? oklchHex(0.16, 0.05, hue) : oklchHex(0.38, 0.09, hue);
-  board.shadeK = S.dark ? 1 : 0.6;
+  board.setShade(S.dark ? oklchHex(0.16, 0.05, hue) : oklchHex(0.38, 0.09, hue), S.dark ? 1 : 0.6);
 }
 
 /** Take on a theme (the switches follow in whatever wave is running). */
@@ -1402,7 +1454,7 @@ function applyTheme(dark) {
   applyLook();
   // Every switch keeps its old gutter until the wave reaches it.
   for (const c of board.cells) c.gap = c.gap || oldGap;
-  board.gapColor = gutter(S.dark, look, S.key);
+  board.gapColor = boardGutter();
   shadeBoard();
   S.frame = paint.frame(S.pt, scheme());
 }
@@ -1425,7 +1477,7 @@ function toggleTheme(e) {
  * The page card joins as switches, each flipping from its light piece to its dark piece through
  * one half-way blend; the header and footer change continuously with the front.
  */
-async function switchTheme(dark, preShots = null, from = liveSwitch()) {
+const switchTheme = safely(async function switchTheme(dark, preShots = null, from = liveSwitch()) {
   const origin = centreOf(from);
   const motion = !reduce.matches;
   // A wave or ripple already moving is turned round from wherever its switches are; only a
@@ -1437,7 +1489,6 @@ async function switchTheme(dark, preShots = null, from = liveSwitch()) {
   else cancelWeb({ keepTheme: true });
   if (dark === S.dark && !rippling) return; // asked for and back again before anything changed
   const token = ++morphToken;
-  themeRippling = true;
   let before = new Set();
   const oldShots = new Map();
   // The card (or title) flips; bars still arriving as switches flip too, and bars that are
@@ -1533,7 +1584,7 @@ async function switchTheme(dark, preShots = null, from = liveSwitch()) {
     await wait(Math.min(end, 2200));
     if (token === morphToken) finishWeb();
   }
-}
+});
 
 // ---------------------------------------------------------------------------
 // Background: re-sample it now and then; flip only the switches whose colour has drifted.
@@ -1562,9 +1613,11 @@ function paintStep(now) {
 // is one continuous moving map; the change is a front crossing that map, with the old colours
 // ahead of it, the new behind, and a soft blend in between. Each switch keeps flipping as its
 // colour drifts, so the wave is simply where the colours change fastest, and the background
-// never pauses. (The gutter changes as the front passes, so every switch turns over there.)
+// never pauses. At the front every switch turns over once, straight to the new colours (and
+// the new gutter), however little its colour changes.
 
 const SWEEP_BAND = 260; // ms the blend takes to pass a point
+const SWEEP_FREEZE = 480; // ms ahead of the front that drift flips stop starting (> the longest one ahead)
 
 function startSweep(from, field, lag, gapFrom, fromFrame = null) {
   if (reduce.matches) return;
@@ -1577,9 +1630,26 @@ function startSweep(from, field, lag, gapFrom, fromFrame = null) {
   }
   // Switches keep their own gutter until the front reaches them.
   for (const c of board.cells) c.gap = c.gap || gapFrom;
-  // (The maps it starts from are the frame the board was showing and the one just computed for
-  // the new colours, so starting a sweep computes nothing new.)
-  S.sweep = { from, to: scheme(), t0: performance.now(), lag, tau, end: lag + last + SWEEP_BAND + 60, gapTo: board.gapColor, at: -Infinity, fromRgb: fromFrame?.rgb, toRgb: S.frame?.rgb };
+  // Where each switch starts from: the colours the board was showing (one of `srcs`) and the
+  // look (plain or ASCII). (The first map is the frame the board was showing, so starting a sweep
+  // computes nothing new.) A sweep that turns round one still running carries over what the
+  // switches its front hadn't reached were showing, so they drift on in that until the new
+  // front reaches them, rather than all flipping at once.
+  const srcs = [{ scheme: from, rgb: fromFrame?.rgb, lab: null }];
+  const src = new Uint8Array(n);
+  const asciiOld = new Uint8Array(n).fill(S.ascii ? 1 : 0);
+  const prev = S.sweep;
+  if (prev && prev.turned.length === n) {
+    for (let i = 0; i < n; i++) {
+      if (prev.turned[i]) continue;
+      const was = prev.srcs[prev.src[i]];
+      let k = srcs.indexOf(was);
+      if (k < 0 && srcs.length < 4) k = srcs.push(was) - 1;
+      src[i] = Math.max(0, k);
+      asciiOld[i] = prev.asciiOld[i];
+    }
+  }
+  S.sweep = { srcs, src, asciiOld, to: scheme(), t0: performance.now(), lag, tau, turned: new Uint8Array(n), frozen: new Uint8Array(n), end: lag + last + SWEEP_BAND + 60, gapTo: board.gapColor, at: -Infinity, toRgb: S.frame?.rgb };
 }
 
 function sweepStep(now) {
@@ -1600,36 +1670,63 @@ function sweepStep(now) {
     };
     const first = !sw.b;
     if (!first) S.frame = paint.frame(S.pt, sw.to);
-    if (!sw.a || !S.lite) sw.a = toLab(first && sw.fromRgb ? sw.fromRgb : paint.frame(S.pt, sw.from).rgb);
+    for (const f of sw.srcs) {
+      if (!f.lab) f.lab = toLab(f.rgb || paint.frame(S.pt, f.scheme).rgb);
+      else if (!S.lite) f.lab = toLab(paint.frame(S.pt, f.scheme).rgb);
+    }
     sw.b = toLab(first && sw.toRgb ? sw.toRgb : S.frame.rgb);
   }
   const el = now - sw.t0 - sw.lag;
-  const th = paintThreshold();
+  const th2 = paintThreshold() ** 2;
   for (const c of board.cells) {
-    // (A switch mid-flip finishes first; one only waiting to drift can be taken by the front.)
-    if (!isPaint(c.abs) || c.anim) continue;
+    if (!isPaint(c.abs)) continue;
     const i = c.i;
     const k = i * 3;
-    const x = Math.min(1, Math.max(0, (el - sw.tau[i]) / SWEEP_BAND));
-    const w = x * x * (3 - 2 * x);
-    const inBand = x > 0 && x < 1;
-    const [r, g, b] = labToRgb(sw.a[k] + (sw.b[k] - sw.a[k]) * w, sw.a[k + 1] + (sw.b[k + 1] - sw.a[k + 1]) * w, sw.a[k + 2] + (sw.b[k + 2] - sw.a[k + 2]) * w);
-    const d2 = (r - c.r) ** 2 + (g - c.g) ** 2 + (b - c.b) ** 2;
-    const regap = w >= 0.5 && c.gap && c.gap !== sw.gapTo;
-    if (c.q.length && !inBand && !regap) continue; // (already due to drift)
-    // In the band the colours move fast: a coarser step keeps it to one or two flips.
-    if (d2 > (inBand ? 1.5 * th : th) ** 2 || regap) {
+    const x = (el - sw.tau[i]) / SWEEP_BAND;
+    if (!sw.turned[i]) {
+      if (x >= 0.5) {
+        // The front (half-way through the blend): the switch turns over whatever its threshold,
+        // straight to the new colours (its flip takes about as long as the rest of the blend).
+        // This replaces a drift flip still waiting; one still in motion (the freeze should have
+        // seen to that) is hurried to land first.
+        sw.turned[i] = 1;
+        board.hurry(c, 60);
+        const [r, g, b] = labToRgb(sw.b[k], sw.b[k + 1], sw.b[k + 2]);
+        c.r = r;
+        c.g = g;
+        c.b = b;
+        board.flip(c, paintFace(r, g, b), { dur: FLIP_DUR, gap: sw.gapTo });
+        // Now that it shows the current colour, leave it a random way towards its next drift
+        // flip (as in steady drift), so they don't all come due again together.
+        staggerMemory(c, k);
+        continue;
+      }
+      // An unseen freeze runs SWEEP_FREEZE ms ahead of the front: once it has passed, no drift
+      // flip starts (one still waiting is dropped, one in motion is hurried to land in time), so
+      // every switch is free to turn over the moment the front arrives.
+      const toFront = sw.tau[i] + SWEEP_BAND / 2 - el;
+      if (x > 0 || toFront < SWEEP_FREEZE * board.durScale) {
+        if (!sw.frozen[i]) {
+          sw.frozen[i] = 1;
+          board.dropQueue(c);
+          board.hurry(c, Math.max(60, toFront - 30));
+        }
+        continue;
+      }
+    }
+    // Ahead of the freeze the old colours drift on, behind the front the new ones.
+    if (c.anim || c.q.length) continue;
+    const m = sw.turned[i] ? sw.b : sw.srcs[sw.src[i]].lab;
+    const [r, g, b] = labToRgb(m[k], m[k + 1], m[k + 2]);
+    if ((r - c.r) ** 2 + (g - c.g) ** 2 + (b - c.b) ** 2 > th2) {
       c.r = r;
       c.g = g;
       c.b = b;
-      const atFront = inBand || regap;
-      // (Ahead of the front, drift flips are kept short so the front never waits on one; behind
-      // it they are the ordinary drift, so handing back to paintStep shows no seam.)
-      const drift = x === 0 ? { delay: rand() * 250, dur: 320 + rand() * 120 } : { delay: rand() * 500, dur: 440 + rand() * 240 };
-      board.flip(c, solid(rgbHex(r, g, b)), atFront ? { dur: FLIP_DUR, gap: w >= 0.5 ? sw.gapTo : null } : drift);
-      // Every switch turns over at the front; leave each a random way towards its next drift
-      // flip (as in steady drift), so they don't all come due again together.
-      if (atFront && w >= 0.5) staggerMemory(c, k);
+      // (Ahead of the freeze, drift flips are short and start before it arrives, so each lands
+      // before the front; behind the front they are the ordinary drift, so handing back to
+      // paintStep shows no seam.)
+      const ahead = sw.tau[i] + SWEEP_BAND / 2 - el - SWEEP_FREEZE * board.durScale;
+      board.flip(c, paintFace(r, g, b, sw.turned[i] ? S.ascii : !!sw.asciiOld[i]), sw.turned[i] ? { delay: rand() * 500, dur: 440 + rand() * 240 } : { delay: rand() * Math.min(250, ahead), dur: 320 + rand() * 120 });
     }
   }
   if (el > sw.end) {
@@ -1919,6 +2016,10 @@ brushToggle.addEventListener('click', () => {
 
 const options = mountOptions(look, onLookChange);
 
+watchCodes({ abacabb: toggleAscii, konami: playBadApple });
+$('#ascii-toggle').addEventListener('click', toggleAscii);
+$('#apple-toggle').addEventListener('click', playBadApple);
+
 window.addEventListener('keydown', (e) => {
   if (e.altKey || e.ctrlKey || e.metaKey) return;
   if (e.key === 'd' || e.key === 'D') {
@@ -2007,8 +2108,82 @@ function switchCards() {
   );
 }
 
+/** The secret ASCII mode: the board ripples out from the middle into coloured characters (or back). */
+function toggleAscii() {
+  if (pendingApply || goingTo || S.overlay || S.sweep) return void setTimeout(toggleAscii, 250); // (once the running transition is done)
+  const sweepFrom = scheme();
+  const gapFrom = board.gapColor;
+  const fromFrame = S.frame;
+  S.ascii = !S.ascii;
+  $('#ascii-toggle').setAttribute('aria-pressed', String(S.ascii));
+  retintGutter();
+  if (reduce.matches) return settleBackground();
+  startSweep(sweepFrom, motionField('ripple'), -SWEEP_BAND / 2, gapFrom, fromFrame);
+  S.sweep.asciiOld.fill(S.ascii ? 0 : 1); // (ahead of the front, switches keep the old look)
+}
+
+/**
+ * The Konami code: Bad Apple!! plays on the board, on smaller switches, with the background
+ * carrying on around it. Esc, a click or a tap stops it; other keys wait until it is over.
+ */
+async function playBadApple() {
+  if (S.player || reduce.matches) return; // (a flashing video: not with reduced motion)
+  if (pendingApply || goingTo || S.overlay) return void setTimeout(playBadApple, 250); // (once the running transition is done)
+  S.player = 'loading';
+  let frames;
+  let Player;
+  try {
+    const mod = await import('./badapple.js');
+    Player = mod.Player;
+    frames = await mod.loadFrames('assets/badapple.bin');
+  } catch (err) {
+    console.warn('Bad Apple!! could not load', err);
+    S.player = null;
+    return;
+  }
+  dropBrush();
+  restoreBrushBoxes(true);
+  document.documentElement.classList.add('playing');
+  S.small = true;
+  build(false);
+  S.player = new Player(board, frames, { dark: solid('#0b0d10'), light: solid('#eef1f5'), rippleMs: WAVE_MS, onEnd: stopBadApple });
+  addEventListener('keydown', playerKeys, true);
+  addEventListener('pointerdown', stopBadApple, true);
+}
+function playerKeys(e) {
+  if (e.key === 'Escape') stopBadApple();
+  else if (!/^(Tab|F\d+)$/.test(e.key)) e.stopImmediatePropagation(); // (the site's keys wait)
+}
+function stopBadApple(e) {
+  if (!S.player || S.player === 'loading') return;
+  // (The click that stopped it does nothing else; a press that makes no click arms nothing for long.)
+  if (e?.type === 'pointerdown' && e.button === 0) {
+    const eat = (c) => c.stopImmediatePropagation();
+    addEventListener('click', eat, { capture: true, once: true });
+    setTimeout(() => removeEventListener('click', eat, true), 600);
+  }
+  removeEventListener('keydown', playerKeys, true);
+  removeEventListener('pointerdown', stopBadApple, true);
+  S.player.release();
+  S.player = null;
+  S.small = false;
+  build(false);
+  // The page comes back the way it first arrives: switching in from the background.
+  webGo(() => {}, { fromNothing: true });
+  document.documentElement.classList.remove('playing');
+}
+
+/** Without motion: the background takes its new colours and gutters at once. */
+function settleBackground() {
+  S.frame = paint.frame(S.pt, scheme());
+  retarget(allCells(), null, (i) => !faceAt(i));
+  for (const c of board.cells) c.gap = null;
+  board.redrawAll();
+}
+
 /** The board ripples from `origin` into the page's next colour combo. */
 function pulseCombo(origin) {
+  if (pendingApply || goingTo || S.overlay || S.sweep) return; // (not over a transition still running)
   const page = S.key;
   const n = COMBOS[page]?.length || 1;
   const sweepFrom = scheme();
@@ -2018,7 +2193,8 @@ function pulseCombo(origin) {
   applyColours();
   retintGutter();
   S.frame = paint.frame(S.pt, scheme());
-  startSweep(sweepFrom, motionField('ripple', 1, origin), -SWEEP_BAND / 2, gapFrom, fromFrame);
+  if (reduce.matches) settleBackground();
+  else startSweep(sweepFrom, motionField('ripple', 1, origin), -SWEEP_BAND / 2, gapFrom, fromFrame);
   schedulePrefetch();
 }
 
@@ -2029,7 +2205,7 @@ async function onLookChange(key) {
   applyLook();
   shotCache.clear();
   if (key === 'font') await document.fonts.load(`700 64px ${getComputedStyle(document.documentElement).getPropertyValue('--display')}`).catch(() => {});
-  if (key === 'palette') board.gapColor = gutter(S.dark, look, S.key);
+  if (key === 'palette') board.gapColor = boardGutter();
   syncDom();
   S.frame = paint.frame(S.pt, scheme());
   S.lastStep = performance.now();
@@ -2053,6 +2229,7 @@ function loop(now) {
     sweepStep(now);
   }
   watchFrames(now);
+  if (S.player && S.player !== 'loading') S.player.step(now);
   const b = S.brush;
   if (b && b.painting && b.last >= 0 && now - b.lastSplash >= RESPLASH_MS) {
     splash(b.last, true);
@@ -2083,15 +2260,21 @@ function watchFrames(now) {
   if (d[(d.length / 2) | 0] > 28) goLite();
 }
 
+window.boardStarting = true; // (index.html's plain-page fallback leaves it to start() from here)
+
 async function start() {
   S.lite = paint.lite;
   if (S.lite) document.documentElement.dataset.lite = '';
   applyLook();
-  await Promise.all([
-    document.fonts.load('400 13px "IBM Plex Mono"'),
-    document.fonts.load('500 13px "IBM Plex Mono"'),
-    document.fonts.load('600 13px "IBM Plex Mono"'),
-    document.fonts.load(`700 64px ${getComputedStyle(document.documentElement).getPropertyValue('--display')}`),
+  // (Fonts are local and quick; a slow one doesn't hold the board back for long.)
+  await Promise.race([
+    Promise.all([
+      document.fonts.load('400 13px "IBM Plex Mono"'),
+      document.fonts.load('500 13px "IBM Plex Mono"'),
+      document.fonts.load('600 13px "IBM Plex Mono"'),
+      document.fonts.load(`700 64px ${getComputedStyle(document.documentElement).getPropertyValue('--display')}`),
+    ]),
+    wait(3000),
   ]).catch(() => {});
   S.key = keyFromHash() || 'intro';
   syncDom();

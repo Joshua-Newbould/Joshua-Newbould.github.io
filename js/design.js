@@ -13,7 +13,7 @@ export const DECISIONS = {
   flip: { label: 'Switch flip', options: { fall: 'Classic', settle: 'Settle', crisp: 'Crisp' } },
 };
 
-export const DEFAULT_LOOK = { palette: 'mineral', bg: 'silk', chrome: 'hairline', font: 'grotesk', motion: 'sweep', card: 'window', flip: 'fall' };
+export const DEFAULT_LOOK = { palette: 'mineral', bg: 'silk', chrome: 'hairline', font: 'grotesk', motion: 'sweep', card: 'window', flip: 'crisp' };
 
 const valid = (k, v) => DECISIONS[k] && Object.hasOwn(DECISIONS[k].options, v);
 

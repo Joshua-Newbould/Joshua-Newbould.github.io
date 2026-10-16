@@ -76,7 +76,13 @@ export class Board {
     this.gapColor = '#050506';
     this.shade = '#000'; // the flip's shading colour, and its strength
     this.shadeK = 1;
+    this.shades = new Map(); // gutter colour -> the shading that goes with it
     this.flipStyle = 'fall'; // how the flap falls: 'fall' (gravity), 'settle' (bounces) or 'crisp'
+  }
+
+  /** How much longer than asked a flip takes in the current style (the crisp fall is unhurried). */
+  get durScale() {
+    return this.flipStyle === 'crisp' ? 1.2 : 1;
   }
 
   /** Change the colour of the gutters between flaps at once (on start-up).
@@ -86,6 +92,14 @@ export class Board {
     this.gapColor = color;
     for (const c of this.cells) c.gap = null;
     if (this.cells.length) this.redrawAll();
+  }
+
+  /** The flip's shading for the current gutter colour. A switch shades its flips to match its
+   *  own gutter, so one that keeps its old gutter until a wave reaches it keeps its old tint too. */
+  setShade(shade, k) {
+    this.shade = shade;
+    this.shadeK = k;
+    this.shades.set(this.gapColor, { shade, k });
   }
 
   /** Grid geometry for a viewport, in device pixels. Pure, so layouts can try several sizes.
@@ -258,28 +272,33 @@ export class Board {
       // How far the top flap has turned over its hinge (0 … π). Three versions of the fall:
       //   fall    gravity: it starts slowly and accelerates
       //   settle  the same, landing with a small bounce, like a heavy mechanical board
-      //   crisp   a harder, faster drop, with the hinge and the flap's edge drawn
+      //   crisp   a firm drop that eases into its landing, with the hinge and the flap's edge drawn
       const style = this.flipStyle;
       const grav = (q) => q * q * 0.55 + q * 0.45;
       let turn = grav(p);
       if (style === 'settle') turn = p < 0.8 ? grav(p / 0.8) : 1 - 0.08 * Math.sin((Math.PI * (p - 0.8)) / 0.2);
-      else if (style === 'crisp') turn = p ** 1.7;
+      else if (style === 'crisp') {
+        const q = p ** 1.3;
+        turn = q * q * (3 - 2 * q);
+      }
       const theta = Math.PI * turn;
-      const k = this.shadeK * (style === 'crisp' ? 1.25 : style === 'settle' ? 1.1 : 1);
+      const sh = this.shades.get(s.gap || this.gapColor) || { shade: this.shade, k: this.shadeK };
+      const shade = sh.shade;
+      const k = sh.k * (style === 'crisp' ? 1.15 : style === 'settle' ? 1.1 : 1);
       const bh = fh - hy;
       this.drawPart(a.to, gm, x, 0, hy, y, hy);
       this.drawPart(a.from, gm, x, hy, bh, y + hy, bh);
-      ctx.fillStyle = this.shade;
+      ctx.fillStyle = shade;
       if (theta < Math.PI / 2) {
         const sc = Math.cos(theta);
         const h = hy * sc;
         this.drawPart(a.from, gm, x, 0, hy, y + hy - h, h);
-        ctx.fillStyle = this.shade;
+        ctx.fillStyle = shade;
         ctx.globalAlpha = k * 0.5 * (1 - sc);
         ctx.fillRect(x, y + hy - h, fw, h);
         ctx.globalAlpha = k * 0.3 * sc;
         ctx.fillRect(x, y, fw, hy - h);
-        if (style === 'crisp') this.edge(x, y + hy - h, fw, 1 - sc);
+        if (style === 'crisp') this.edge(x, y + hy - h, fw, 1 - sc, shade);
       } else {
         const sc = -Math.cos(theta);
         const h = bh * sc;
@@ -287,15 +306,15 @@ export class Board {
         ctx.fillRect(x, y + hy, fw, bh);
         ctx.globalAlpha = 1;
         this.drawPart(a.to, gm, x, hy, bh, y + hy, h);
-        ctx.fillStyle = this.shade;
+        ctx.fillStyle = shade;
         ctx.globalAlpha = k * 0.4 * (1 - sc);
         ctx.fillRect(x, y + hy, fw, h);
-        if (style === 'crisp') this.edge(x, y + hy + h - 1, fw, 1 - sc);
+        if (style === 'crisp') this.edge(x, y + hy + h - 1, fw, 1 - sc, shade);
       }
       if (style === 'crisp') {
         // The hinge: a fine dark line across the split while the flap turns.
-        ctx.fillStyle = this.shade;
-        ctx.globalAlpha = 0.35 * this.shadeK;
+        ctx.fillStyle = shade;
+        ctx.globalAlpha = 0.28 * sh.k;
         ctx.fillRect(x, y + hy - 0.5, fw, 1);
       }
       ctx.globalAlpha = 1;
@@ -306,12 +325,12 @@ export class Board {
   }
 
   /** A thin catch-light along the flap's moving edge (the 'crisp' fall). */
-  edge(x, y, w, strength) {
+  edge(x, y, w, strength, shade) {
     const ctx = this.ctx;
     ctx.fillStyle = '#fff';
-    ctx.globalAlpha = 0.28 * strength;
+    ctx.globalAlpha = 0.2 * strength;
     ctx.fillRect(x, y, w, 1);
-    ctx.fillStyle = this.shade;
+    ctx.fillStyle = shade;
   }
 
   redrawAll() {
@@ -353,11 +372,28 @@ export class Board {
     s.eOut = edgesOut;
     s.eFrom = s.ca ?? 1;
     if (edgesIn) s.caAnim = null;
-    if (steps) for (const st of steps) s.q.push(st.t ? { f: st, d: stepDur, w: 0 } : { f: st.f, d: stepDur, w: st.w || 0 });
+    const k = this.durScale;
+    if (steps) for (const st of steps) s.q.push(st.t ? { f: st, d: stepDur * k, w: 0 } : { f: st.f, d: stepDur * k, w: st.w || 0 });
     // `gap`: the gutter around this flap changes colour as the flip starts (theme waves).
-    s.q.push({ f, d: dur, w: 0, then, gap: gap || pending });
+    s.q.push({ f, d: dur * k, w: 0, then, gap: gap || pending });
     s.at = performance.now() + delay;
     this.active.add(s);
+  }
+
+  /** Make a flip in motion land within `ms`: it carries on from where it is, only faster. */
+  hurry(s, ms) {
+    const a = s.anim;
+    if (!a) return;
+    const now = performance.now();
+    if (a.t0 + a.dur - now <= ms) return;
+    const p = Math.min(1, Math.max(0, (now - a.t0) / a.dur));
+    a.dur = ms / (1 - p);
+    a.t0 = now - p * a.dur;
+  }
+
+  /** Drop the flips still waiting (one in motion carries on). */
+  dropQueue(s) {
+    s.q.length = 0;
   }
 
   tick(now) {
