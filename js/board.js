@@ -766,13 +766,13 @@ export class Board {
   }
 
   /** Set a flap's edge visibility at once. */
-  setEdges(s, ca) {
+  setEdges(s, ca, now = performance.now()) {
     if (typeof s === 'number') s = this.cells[s];
     s.ca = ca;
     s.caAnim = null;
     s.eIn = 0;
     s.eOut = 0;
-    this.draw(s, performance.now());
+    this.draw(s, now);
   }
 
   /** Grid cell under a CSS-pixel point, or -1. */

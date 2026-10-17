@@ -458,7 +458,8 @@ function* allCells() {
 
 /** Every switch back to normal edges (e.g. when a transition is interrupted). */
 function resetEdges() {
-  for (const c of board.cells) if ((c.ca ?? 1) !== 1 || c.caAnim) board.setEdges(c, 1);
+  const now = performance.now();
+  for (const c of board.cells) if ((c.ca ?? 1) !== 1 || c.caAnim) board.setEdges(c, 1, now);
 }
 
 // ---------------------------------------------------------------------------
@@ -1436,7 +1437,8 @@ async function boxesToSwitches(boxes, keep = null) {
   board.hold(); // (each switch drawn once, face and edges together)
   try {
     retarget(added, null, () => true);
-    for (const i of added) board.setEdges(i, 0);
+    const now = performance.now();
+    for (const i of added) board.setEdges(i, 0, now);
   } finally {
     board.release();
   }
@@ -1623,7 +1625,7 @@ function go(key, { dir = 1, push = true, origin = null } = {}) {
       if (themeWanted()) applyTheme(S.wantDark); // a theme switch cut short rides this wave
       syncDom();
       S.frame = paint.frame(scheme());
-      keepFocus(from);
+      setTimeout(() => keepFocus(from)); // (focusing makes the browser lay the new page out: not in this task)
     },
     { dir, toKey: key, origin },
   );
@@ -2009,7 +2011,8 @@ function restoreBrushBoxes(force = false) {
     }
   }
   brushBoxes.clear();
-  for (const i of cells) board.setEdges(i, 1);
+  const now = performance.now();
+  for (const i of cells) board.setEdges(i, 1, now);
   retarget(cells, null, () => true);
 }
 
