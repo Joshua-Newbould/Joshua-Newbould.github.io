@@ -4,11 +4,11 @@
 // again. Everything here is built for that: the board (board.js), the background (paint.js),
 // the design system and its variations (design.js), and the transitions below.
 
-import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js';
-import { GLBoard } from './glboard.js';
-import { Paint } from './paint.js';
-import { watchCodes } from './secrets.js';
-import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js';
+import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=0e39a73';
+import { GLBoard } from './glboard.js?v=0e39a73';
+import { Paint } from './paint.js?v=0e39a73';
+import { watchCodes } from './secrets.js?v=0e39a73';
+import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=0e39a73';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = (s, r = document) => r.querySelector(s);
@@ -25,17 +25,13 @@ const pick = (a) => a[(rand() * a.length) | 0];
 const randInt = (a, b) => a + ((rand() * (b - a + 1)) | 0);
 const wait = (ms) => new Promise((res) => setTimeout(res, ms));
 const clean = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+const esc = (t) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
 // ---------------------------------------------------------------------------
 // Content (the HTML is the source of truth)
 
-const pages = $$('[data-page]').map((el, i) => ({
-  id: el.id,
-  el,
-  num: String(i + 1).padStart(2, '0'),
-  label: el.dataset.label || '',
-  name: clean($('h2', el)),
-}));
+const two = (n) => String(n).padStart(2, '0');
+const pages = $$('[data-page]').map((el, i) => ({ id: el.id, el, num: two(i + 1), name: clean($('h2', el)) }));
 const nav = $$('#site-nav a').map((a) => ({ el: a, id: a.getAttribute('href').slice(1) }));
 const themeToggle = $('#theme-toggle');
 const themeSwitches = () => $$('.theme-switch'); // the header's, and the title box's
@@ -45,19 +41,31 @@ const touchy = matchMedia('(hover: none), (pointer: coarse)'); // a touch screen
 const prevBtn = $('[data-board="prev"]');
 const nextBtn = $('[data-board="next"]');
 
+/** A new element, hidden from screen readers if it only repeats what the page says. */
+const make = (tag, className, html, hide = true) => {
+  const el = Object.assign(document.createElement(tag), { className });
+  el.innerHTML = html;
+  if (hide) el.setAttribute('aria-hidden', 'true');
+  return el;
+};
+/** A window's title strip (status light, path, four short stripes in the page's colours) and its
+ *  status line. */
+const windowChrome = (el, path, num) => {
+  el.prepend(make('div', 'w-bar', `<span class="w-dot"></span><span class="w-path">JN://<b>${path}</b></span><span class="w-stripes"><i></i><i></i><i></i><i></i></span>`));
+  el.append(make('div', 'w-statusline', `<span>SEC ${num}/${two(pages.length)}</span>`));
+};
+
 // Give generated labels real elements (so snapshots, which copy the laid-out DOM, show them),
 // and put each card's contents in one box that can be scaled down to fit the screen.
 for (const pg of pages) {
   const el = pg.el;
-  const big = Object.assign(document.createElement('p'), { className: 'w-big', textContent: el.dataset.big || pg.name });
-  big.setAttribute('aria-hidden', 'true');
-  el.prepend(big);
-  for (const li of $$('li[data-code]', el)) li.prepend(Object.assign(document.createElement('span'), { className: 'w-code', textContent: li.dataset.code }));
+  el.prepend(make('p', 'w-big', esc(el.dataset.big || pg.name)));
+  for (const li of $$('li[data-code]', el)) li.prepend(make('span', 'w-code', li.dataset.code, false));
   for (const li of $$('ol > li[data-year]', el)) {
-    li.prepend(Object.assign(document.createElement('span'), { className: 'w-year', textContent: li.dataset.year }));
-    li.append(Object.assign(document.createElement('span'), { className: 'w-status', textContent: li.dataset.status }));
+    li.prepend(make('span', 'w-year', li.dataset.year, false));
+    li.append(make('span', 'w-status', li.dataset.status, false));
   }
-  const fit = Object.assign(document.createElement('div'), { className: 'w-fit' });
+  const fit = make('div', 'w-fit', '', false);
   fit.append(...el.childNodes);
   el.append(fit);
   // The pieces a card can be split into when it doesn't fit the screen: list items, rows of
@@ -71,47 +79,24 @@ for (const pg of pages) {
   pg.part = 0;
   pg.parts = [pg.units];
   pg.splitting = false;
-  const pager = document.createElement('div');
-  pager.className = 'w-pager';
-  pager.innerHTML =
-    '<button type="button" class="pg-prev" aria-label="Previous part"><svg class="arr" aria-hidden="true" viewBox="0 0 12 8"><path d="M4 1 1 4l3 3M1 4h10"/></svg></button>' +
-    '<span class="pg-num" aria-live="polite"></span>' +
-    '<button type="button" class="pg-next" aria-label="Next part"><svg class="arr" aria-hidden="true" viewBox="0 0 12 8"><path d="m8 1 3 3-3 3M11 4H1"/></svg></button>';
-  el.append(pager);
-  pg.pager = pager;
-  // The window's title strip and status line.
-  const bar = document.createElement('div');
-  bar.className = 'w-bar';
-  bar.setAttribute('aria-hidden', 'true');
-  bar.innerHTML = `<span class="w-dot"></span><span class="w-path">JN://<b>${pg.id}</b></span><span class="w-stripes"><i></i><i></i><i></i><i></i></span>`;
-  el.prepend(bar);
-  const status = document.createElement('div');
-  status.className = 'w-statusline';
-  status.setAttribute('aria-hidden', 'true');
-  status.innerHTML = `<span>SEC ${pg.num}/${String(pages.length).padStart(2, '0')}</span>`;
-  el.append(status);
+  const arrow = (d) => `<svg class="arr" aria-hidden="true" viewBox="0 0 12 8"><path d="${d}"/></svg>`;
+  pg.pager = make('div', 'w-pager', `<button type="button" class="pg-prev" aria-label="Previous part">${arrow('M4 1 1 4l3 3M1 4h10')}</button><span class="pg-num" aria-live="polite"></span><button type="button" class="pg-next" aria-label="Next part">${arrow('m8 1 3 3-3 3M11 4H1')}</button>`, false);
+  el.append(pg.pager);
+  windowChrome(el, pg.id, pg.num);
 }
 
-// The title box gets the same window strip and status line.
+// The title box is a window too. Its strip carries ASCII mode and the sun/moon switch, so they can
+// be chosen before entering.
 {
-  const bar = document.createElement('div');
-  bar.className = 'w-bar';
-  bar.setAttribute('aria-hidden', 'true');
-  bar.innerHTML = '<span class="w-dot"></span><span class="w-path">JN://<b>home</b></span><span class="w-stripes"><i></i><i></i><i></i><i></i></span>';
-  // ASCII mode and the sun/moon switch, here too, so they can be chosen before entering.
+  windowChrome(introEl, 'home', '00');
+  const bar = $('.w-bar', introEl);
+  for (const n of bar.children) n.setAttribute('aria-hidden', 'true');
+  bar.removeAttribute('aria-hidden');
   const ascii = $('#ascii-toggle').cloneNode(true);
   ascii.id = 'intro-ascii';
   const sw = themeToggle.cloneNode(true);
   sw.id = 'intro-theme';
-  bar.removeAttribute('aria-hidden');
-  for (const n of bar.querySelectorAll('.w-dot, .w-path, .w-stripes')) n.setAttribute('aria-hidden', 'true');
   bar.append(ascii, sw);
-  introEl.prepend(bar);
-  const status = document.createElement('div');
-  status.className = 'w-statusline';
-  status.setAttribute('aria-hidden', 'true');
-  status.innerHTML = `<span>SEC 00/${String(pages.length).padStart(2, '0')}</span>`;
-  introEl.append(status);
 }
 
 /** Show one part of a card (all of it when it fits in one). */
@@ -129,7 +114,6 @@ function showPart(pg) {
   pg.el.classList.toggle('paged', paged);
   pg.el.classList.toggle('later', pg.part > 0); // parts after the first drop the repeated lines
   pg.el.dataset.part = paged ? `${pg.part + 1}/${parts.length}` : '';
-  const two = (n) => String(n).padStart(2, '0');
   $('.pg-num', pg.pager).textContent = `${two(pg.part + 1)}/${two(parts.length)}`; // (as the status line's 'SEC 01/04')
   const prev = $('.pg-prev', pg.pager);
   const next = $('.pg-next', pg.pager);
@@ -898,7 +882,7 @@ function inlinedCss() {
   if (!cssText) {
     cssText = (async () => {
       const xml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-      const css = (await (await fetch('css/style.css')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
+      const css = (await (await fetch('css/style.css?v=0e39a73')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
       const faces = new Map();
       for (const [block] of css.matchAll(/@font-face\s*{[^}]*}/g)) {
         const url = block.match(/url\("([^"]+)"\)/)[1];
@@ -931,7 +915,6 @@ function fontsFor(faces, used) {
 }
 
 const KEEP = ['font-size', 'line-height', 'letter-spacing', 'font-weight', 'font-family', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left', 'row-gap', 'column-gap', 'grid-template-columns', 'color', 'text-transform', 'text-decoration-line', 'text-decoration-color', 'text-decoration-thickness', 'text-underline-offset'];
-const esc = (t) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
 // Rendered sections are reused: they only change with their size and place, their colours,
 // the theme and what they say (the current page, the footer's labels, a card's part, the theme
@@ -1083,8 +1066,8 @@ async function prefetchShots() {
   const busy = () => S.overlay || S.brush || goingTo || brushBoxes.size;
   if (busy()) return;
   // (Nothing that goes into the pictures has changed since the last full run: all are cached.)
-  const pg0 = pages[pageIndex(S.key)];
-  const sig = [S.key, pg0?.part, S.dark, S.ascii, S.size, look.palette, look.motion, ...pages.map((p) => comboOf(p.id)), comboOf('intro')].join('|');
+  const sigNow = () => [S.key, pages[pageIndex(S.key)]?.part, S.dark, S.ascii, S.size, look.palette, look.motion, ...pages.map((p) => comboOf(p.id)), comboOf('intro')].join('|');
+  const sig = sigNow();
   if (sig === prefetchedFor) return;
   // Briefly lay a hidden box out (invisibly), copy it, and put everything back — all synchronous.
   const withShown = (el, fn) => {
@@ -1168,12 +1151,17 @@ async function prefetchShots() {
         el,
         o,
         () => {
-          nav.find((x) => x.id === 'about').el.setAttribute('aria-current', 'page');
+          const cur = nav.find((x) => x.el.hasAttribute('aria-current'));
+          const about = nav.find((x) => x.id === 'about');
+          cur?.el.removeAttribute('aria-current');
+          about.el.setAttribute('aria-current', 'page');
           setFooterLabels('about');
           try {
             return inColours('about', () => withShown(el, () => snapshot(el, o)));
           } finally {
-            nav.find((x) => x.id === 'about').el.removeAttribute('aria-current');
+            about.el.removeAttribute('aria-current');
+            cur?.el.setAttribute('aria-current', 'page');
+            if (S.key !== 'intro') setFooterLabels(S.key);
           }
         },
       ]);
@@ -1184,7 +1172,7 @@ async function prefetchShots() {
   for (const [el, o, make] of jobs) {
     if (shotCache.has(shotKey(el, o))) continue;
     await idle();
-    if (busy()) return;
+    if (busy() || sigNow() !== sig) return; // (the page has moved on: its own prefetch follows)
     await make();
   }
   if (!busy()) prefetchedFor = sig;
@@ -2382,7 +2370,7 @@ async function playBadApple() {
   let frames;
   let Player;
   try {
-    const mod = await import('./badapple.js');
+    const mod = await import('./badapple.js?v=0e39a73');
     Player = mod.Player;
     frames = await mod.loadFrames('assets/badapple.bin');
   } catch (err) {

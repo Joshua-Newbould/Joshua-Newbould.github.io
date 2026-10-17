@@ -21,10 +21,10 @@ Then open <http://localhost:8420/>.
 All content lives in `index.html` inside `#source`. Screen readers and visitors without
 JavaScript read it directly.
 
-- **Title screen**: `#intro` (name and role). The `<h1>`'s `data-short` is the short form used on
-  very small screens.
-- **Pages** are the `<section data-page>` elements: `data-big` is the large title,
-  `data-label` the small index label, and each `<p data-strip>` a line under the title.
+- **Title screen**: `#intro` (name and role).
+- **Pages** are the `<section data-page>` elements: `data-big` is the large title and each
+  `<p data-strip>` a line under the title.
+- **Header**: links with a `data-short` use it where the full text doesn't fit.
 - **Publications**: one `<li>` per paper with `data-year` and `data-status`
   (`Oral`, `Published`, …).
 - **Footer**: the copyright line and the previous/next buttons, labelled automatically.
