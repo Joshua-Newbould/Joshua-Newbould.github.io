@@ -57,12 +57,12 @@ screen is cool silver and white.
 
 | File | Role |
 | --- | --- |
-| `js/board.js` | The canvas board: identical flaps, flip animation, timing, gutters, batched drawing (`hold`/`release`) |
-| `js/glboard.js` | The same board drawn by the GPU (WebGL2): one draw call a frame, pixel for pixel the 2D look |
-| `js/paint.js` | The background (three modes): a WebGL shader, or the same field in JavaScript without a GPU |
-| `js/design.js` | Colour schemes, the design variations and the options panel |
+| `js/board.js` | The board's model (identical flaps, flip animation, timing, gutters) and its 2D-canvas drawing |
+| `js/glboard.js` | The same board drawn by the GPU (WebGL2), the default: only switches that change or move are drawn |
+| `js/paint.js` | The background: its pattern worked out by a shader (or in JavaScript without a GPU), any scheme's colours from it |
+| `js/design.js` | Colour schemes, the palettes and their review panel |
 | `js/main.js` | Layout and parts, section snapshots, transitions, theme switch, brush and input |
-| `css/style.css` | The web layer: typography, cards, header/footer variants, phone layout |
+| `css/style.css` | The web layer: typography, cards, header and footer, phone layout |
 
 Sections are laid out on the flap grid and never scroll. A card that doesn't fit is first
 set a little smaller; if that isn't enough it is split into numbered parts (‹ 1 / 3 ›), which
@@ -70,11 +70,19 @@ flip like pages: use the arrows on the card, the mouse wheel over it, the Up/Dow
 quick flick on a touch screen. Switch size follows the screen, so phones get many small
 switches and plenty of board around a smaller card.
 
+Smoothness first: nothing a frame does waits on the GPU (the background's pattern is read back
+when it is ready, a few frames later at most), work that would make a long frame (setting up a
+wave, rendering snapshots) is spread over frames or idle moments, and the GPU board sends only
+what changed. The board is drawn with WebGL2 wherever there is a real GPU, and on a 2D canvas
+otherwise (or with `?gl=0`); if the GPU is lost for good mid-visit, the 2D board takes over.
+
 Without a usable GPU (software WebGL, or frames that can't keep up) the site runs lighter: the
-background is computed in JavaScript at one sample per switch, switches are a little bigger,
-and the board redraws at a lower resolution. The board itself is drawn with WebGL2 wherever
-there is a real GPU, and on a 2D canvas otherwise (or with `?gl=0`); if the GPU is lost for
-good mid-visit, the 2D board takes over.
+background is computed in JavaScript at one sample per switch, a few rows a frame; switches are
+a little bigger, ASCII mode keeps them whole, and flaps in motion are redrawn only as often as
+fits in a frame.
+
+`tools/smoke.mjs` checks the site; `tools/perf/` measures frame times and proves refactors change
+nothing (see its README).
 
 For a transition each visible section is rendered to an image (an SVG `foreignObject`
 with the page's own CSS and fonts), cut into one slice per flap and flipped in a wave; the
