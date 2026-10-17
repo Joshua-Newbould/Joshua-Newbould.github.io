@@ -189,13 +189,11 @@ let board = makeBoard();
 
 /**
  * The board, drawn by the GPU (glboard.js) where there is a real one, else on a 2D canvas: with
- * no WebGL2, a software GPU (lite), or ?gl=0. (?gl=1: by the GPU even if it is a slow one; until
- * GL_BY_DEFAULT is on, only then.)
+ * no WebGL2, a software GPU (lite), or ?gl=0. (?gl=1: by the GPU even if it is a slow one.)
  */
 function makeBoard() {
-  const GL_BY_DEFAULT = false; // (off until it has been tried on more devices: ?gl=1 turns it on)
   const want = new URLSearchParams(location.search).get('gl');
-  const gl = want !== '0' && (want === '1' || (GL_BY_DEFAULT && !paint.lite)) && GLBoard.create(canvas, { force: want === '1' });
+  const gl = want !== '0' && (want === '1' || !paint.lite) && GLBoard.create(canvas, { force: want === '1' });
   if (gl) {
     gl.onfail = fallBack;
     return gl;
@@ -1828,7 +1826,7 @@ function startSweep(from, field, lag, gapFrom, fromFrame = null) {
   // computes nothing new.) A sweep that turns round one still running carries over what the
   // switches its front hadn't reached were showing, so they drift on in that until the new
   // front reaches them, rather than all flipping at once.
-  const srcs = [{ scheme: from, rgb: fromFrame?.rgb, lab: null }];
+  const srcs = [{ scheme: from, rgb: fromFrame?.rgb, map: null }];
   const src = new Uint8Array(n);
   const asciiOld = new Uint8Array(n).fill(S.ascii ? 1 : 0);
   const prev = S.sweep;
@@ -1847,25 +1845,15 @@ function startSweep(from, field, lag, gapFrom, fromFrame = null) {
 
 function sweepStep(now) {
   const sw = S.sweep;
-  // The maps, refreshed as the pattern moves (in OKLab, so blends never dip through grey). (The
-  // first are the colours the board was showing, so starting a sweep computes nothing new.)
+  // The maps (old colours and new), refreshed as the pattern moves. (The first are the colours
+  // the board was showing, so starting a sweep computes nothing new.)
   const fresh = !sw.b || (sw.field !== paint.field && now - sw.at > 100);
   if (fresh) {
     sw.at = now;
-    const toLab = (rgb) => {
-      const out = new Float32Array(rgb.length);
-      for (let k = 0; k < rgb.length; k += 3) {
-        const v = rgbToLab(rgb[k], rgb[k + 1], rgb[k + 2]);
-        out[k] = v[0];
-        out[k + 1] = v[1];
-        out[k + 2] = v[2];
-      }
-      return out;
-    };
     const first = !sw.b;
     if (!first) S.frame = paint.frame(sw.to);
-    for (const f of sw.srcs) f.lab = toLab(first && f.rgb ? f.rgb : paint.frame(f.scheme).rgb);
-    sw.b = toLab(first && sw.toRgb ? sw.toRgb : S.frame.rgb);
+    for (const f of sw.srcs) f.map = first && f.rgb ? f.rgb : paint.frame(f.scheme).rgb;
+    sw.b = first && sw.toRgb ? sw.toRgb : S.frame.rgb;
     sw.field = paint.field;
   }
   const el = now - sw.t0 - sw.lag;
@@ -1883,7 +1871,7 @@ function sweepStep(now) {
         // seen to that) is hurried to land first.
         sw.turned[i] = 1;
         board.hurry(c, 60);
-        const [r, g, b] = labToRgb(sw.b[k], sw.b[k + 1], sw.b[k + 2]);
+        const [r, g, b] = [sw.b[k], sw.b[k + 1], sw.b[k + 2]];
         c.r = r;
         c.g = g;
         c.b = b;
@@ -1910,8 +1898,10 @@ function sweepStep(now) {
     // Ahead of the freeze the old colours drift on, behind the front the new ones (looked at
     // when the maps have moved on: in between they say the same).
     if (!fresh || c.anim || c.q.length) continue;
-    const m = sw.turned[i] ? sw.b : sw.srcs[sw.src[i]].lab;
-    const [r, g, b] = labToRgb(m[k], m[k + 1], m[k + 2]);
+    const m = sw.turned[i] ? sw.b : sw.srcs[sw.src[i]].map;
+    const r = m[k];
+    const g = m[k + 1];
+    const b = m[k + 2];
     if ((r - c.r) ** 2 + (g - c.g) ** 2 + (b - c.b) ** 2 > th2) {
       c.r = r;
       c.g = g;

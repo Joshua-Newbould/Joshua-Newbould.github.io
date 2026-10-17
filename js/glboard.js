@@ -20,9 +20,12 @@ const VS = `#version 300 es
 precision highp float; precision highp int;
 layout(location=0) in ivec4 aC0; layout(location=1) in vec4 aC1; layout(location=2) in ivec4 aC2;
 layout(location=3) in ivec4 aF0; layout(location=4) in ivec4 aF1; layout(location=5) in ivec4 aT0; layout(location=6) in ivec4 aT1;
-uniform vec2 uSize, uCell;
+uniform vec2 uSize, uCell; uniform float uNow; uniform int uFrame;
 flat out ivec4 vC0; flat out vec4 vC1; flat out ivec4 vC2; flat out ivec4 vF0; flat out ivec4 vF1; flat out ivec4 vT0; flat out ivec4 vT1;
 void main() {
+  // Only the switches that changed this frame (stamped with it) and those turning are drawn: the
+  // rest keep their pixels in the frame. (A switch skipped is a quad of nothing, off screen.)
+  if (aC2.z != uFrame && !((aC0.w & 1) != 0 && uNow <= aC1.x + aC1.y + 50.0)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   // (One quad per switch, from the vertex number: no vertex buffer.)
   vec2 corner = vec2(float(gl_VertexID & 1), float(gl_VertexID >> 1));
   vec2 p = vec2(aC0.xy) + corner * uCell;
@@ -91,12 +94,18 @@ vec4 src(int i, vec2 p) {
 }
 vec4 atlas(int layer, vec2 p) { return textureLod(uAtlas, vec3(p / ${A}.0, float(layer)), 0.0); }
 
+// A character's picture is white: it takes the face's ink colour (a brush picture has its own).
+vec4 ink(vec4 p, Face f) { return f.mos ? p : vec4(f.bgap * p.a, p.a); }
 // drawImage(atlas, base.x, base.y + sy0, fw, ph -> rows [dy, dy+dh)): a scaled picture is sampled
 // at the pixel's centre, bilinear, as the canvas does.
 void atlasImg(int layer, ivec2 base, float sy0, float ph, float dy, float dh) {
   float c = cov(dy, dy + dh); if (c <= 0.0) return;
   float sy = sy0 + (Y + 0.5 - dy) * ph / dh;
   over(atlas(layer, vec2(base) + vec2(X + 0.5, sy)), c);
+}
+void glyphImg(Face f, float py, float ph, float dy, float dh) {
+  float c = cov(dy, dy + dh); if (c <= 0.0) return;
+  over(ink(atlas(f.ul, vec2(f.up) + vec2(X + 0.5, py + (Y + 0.5 - dy) * ph / dh)), f), c);
 }
 // drawImage(source, sx, s0, fw, ph -> rows [dy, dy+dh)), the source rectangle clipped to the picture.
 void srcImg(int slot, float sx, float s0, float ph, float dy, float dh) {
@@ -112,7 +121,7 @@ void drawPart(Face f, float py, float ph, float dy, float dh) {
   if (dh < 0.5 || ph <= 0.0 || X >= uFw) return;
   float c = cov(dy, dy + dh); if (c <= 0.0) return;
   fill(f.bg, c);
-  if (f.uk == 1) atlasImg(f.ul, f.up, py, ph, dy, dh);
+  if (f.uk == 1) glyphImg(f, py, ph, dy, dh);
   else if (f.uk == 2) srcImg(f.ul, float(f.up.x), float(f.up.y) + py, ph, dy, dh);
   if (f.mos) atlasImg(f.ml, f.mp, py, ph, dy, dh);
 }
@@ -126,7 +135,7 @@ void under(Face f, bool pic) {
     fill(f.bg, 1.0);
     if (f.uk == 2) srcImg(f.ul, float(f.up.x), float(f.up.y), h, 0.0, h);
   }
-  if (pic && f.uk == 1 && X < uFw && Y < uFh) over(atlas(f.ul, vec2(f.up) + vec2(X + 0.5, Y + 0.5)), 1.0);
+  if (pic && f.uk == 1 && X < uFw && Y < uFh) over(ink(atlas(f.ul, vec2(f.up) + vec2(X + 0.5, Y + 0.5)), f), 1.0);
 }
 void tileBox(int n, int i, float full, out float t0, out float tw) { t0 = jround(float(i) * full / float(n)); tw = jround(float(i + 1) * full / float(n)) - t0; }
 bool tileOn(Face f, int t) { return f.mos && ((f.mask >> t) & 1) != 0; }
@@ -293,10 +302,10 @@ export class GLBoard extends Board {
     this.pending = new Set(); // switches to send to the GPU before the next frame
     this.all = true; // or all of them
     this.later = new Set(); // switches waiting for a picture (see glyph budget)
-    this.movers = []; // the flaps turning this frame (see redraws)
     this.srcs = new Map(); // picture (canvas) -> { slot, tex }
     this.captures = new Set(); // copies of the board, on the GPU only (see capture)
     this.onfail = null; // called if the GPU is lost for good: the 2D board takes over
+    this.tints = true; // (characters are drawn white and take their colour here: see glyphKey)
     this.initGL();
     canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault(); // (so the browser may give it back)
@@ -422,10 +431,7 @@ export class GLBoard extends Board {
     const data = new ArrayBuffer(n * STRIDE * 4);
     this.I = new Int32Array(data);
     this.F = new Float32Array(data);
-    this.out = new Int32Array(n * STRIDE); // (the switches drawn this frame, in a row)
-    this.seen = new Uint32Array(n);
     this.frameNo = 0;
-    this.movers.length = 0;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buf);
     gl.bufferData(gl.ARRAY_BUFFER, data.byteLength, gl.DYNAMIC_DRAW);
     // The frame is kept off screen, as a 2D canvas keeps its pixels: each frame only the switches
@@ -461,7 +467,7 @@ export class GLBoard extends Board {
   }
   /** A flap in motion needs no redraw (the GPU works out where it is): only changes are sent. */
   redraws(s, changed) {
-    if (s.anim) this.movers.push(s);
+    if (s.anim) this.moving = true;
     return changed;
   }
   setShade(shade, k) {
@@ -489,7 +495,7 @@ export class GLBoard extends Board {
   /** A face's picture, if it has been drawn or there is still time to draw it this frame (new
    *  pictures are drawn a few milliseconds' worth a frame, so a board of new ones doesn't stall). */
   picture(f) {
-    const g = this.glyphCache.get(f.gk);
+    const g = this.glyphCache.get(this.glyphKey(f));
     if (g || performance.now() > this.drawUntil) return g;
     return this.glyph(f, this.gm);
   }
@@ -585,15 +591,18 @@ export class GLBoard extends Board {
     I[o + 4] = uy;
     I[o + 5] = ml;
     I[o + 6] = mxy;
-    I[o + 7] = mos ? packColour(f.gap) : 0;
+    I[o + 7] = packColour(mos ? f.gap : u?.t === 'glyph' ? u.fg : null); // (a character's ink: see the shader's ink())
     return ok;
   }
 
-  /** One switch as the shader reads it: where, its gutter and shading, its flip, its faces. */
-  encode(s) {
+  /** One switch as the shader reads it: where, its gutter and shading, its flip, its faces, and
+   *  `stamp`, the frame it is drawn in (still switches are drawn only when they change; one still
+   *  waiting for its picture keeps what it showed, as on a 2D canvas, unless the frame is new). */
+  encode(s, stamp) {
     const o = s.i * STRIDE;
     const I = this.I;
     const F = this.F;
+    const was = I[o + 10];
     const a = s.anim;
     const gap = s.gap || this.gapColor;
     const sh = this.shades.get(gap) || { shade: this.shade, k: this.shadeK };
@@ -611,12 +620,13 @@ export class GLBoard extends Board {
     if (a) ok = this.encodeFace(a.from, o + 12) && ok;
     else I.copyWithin(o + 12, o + 20, o + 28);
     if (!ok) this.later.add(s);
+    I[o + 10] = ok || a || this.fresh ? stamp : was;
   }
 
   /** Bring the GPU's copy up to date and draw the board as it is at `now` (if anything changed
    *  or moves: a still board costs nothing). */
   render(now) {
-    if (this.lost || !this.cells.length) return void (this.movers.length = 0);
+    if (this.lost || !this.cells.length) return void (this.moving = false);
     if (now - (this.sweptAt || 0) > 4000) {
       // (Now and then, let go of pictures no longer shown.)
       this.sweptAt = now;
@@ -629,19 +639,18 @@ export class GLBoard extends Board {
       this.restyle = false;
       for (const s of this.active) if (s.anim) this.pending.add(s);
     }
-    if (!this.all && !this.pending.size && !this.later.size && !this.movers.length) return;
+    if (!this.all && !this.pending.size && !this.later.size && !this.moving) return;
     try {
       this.frame(now);
       this.fails = 0;
     } catch (err) {
       this.fail(err);
     }
-    this.movers.length = 0;
+    this.moving = false;
   }
 
   frame(now) {
     const gl = this.gl;
-    const n = this.cells.length;
     this.swept = false;
     this.drawUntil = performance.now() + 4;
     if (now - this.t0base > 6e5) {
@@ -651,40 +660,28 @@ export class GLBoard extends Board {
     }
     for (const s of this.later) this.pending.add(s);
     this.later.clear();
+    const stamp = ++this.frameNo;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buf);
-    const full = this.all;
-    if (full) {
+    if (this.all) {
       // (An atlas started afresh while encoding sets `all` again: then once more, on the new pages.)
       for (let pass = 0; pass < 2 && this.all; pass++) {
         this.all = false;
-        for (const s of this.cells) this.encode(s);
+        for (const s of this.cells) this.encode(s, stamp);
       }
       this.all = false;
-    } else {
-      for (const s of this.pending) this.encode(s);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.I);
+    } else if (this.pending.size) {
+      const idx = [];
+      for (const s of this.pending) if (this.cells[s.i] === s) (this.encode(s, stamp), idx.push(s.i)); // (not one from before a new grid)
       if (this.all) return this.frame(now);
-    }
-    // A still switch waiting for its picture keeps what it showed until it has it, as on a 2D
-    // canvas (unless the frame is new).
-    const wait = this.fresh ? null : this.later;
-    let count = n;
-    if (full && !wait?.size) gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.I);
-    else {
-      // Only the switches that changed, and those in motion.
-      const { I, out, seen, cells } = this;
-      const k = ++this.frameNo;
-      count = 0;
-      const add = (s) => {
-        if (cells[s.i] !== s || seen[s.i] === k) return; // (one from before a new grid, or seen)
-        seen[s.i] = k;
-        if (!s.anim && wait?.has(s)) return;
-        const o = s.i * STRIDE;
-        const d = count++ * STRIDE;
-        for (let j = 0; j < STRIDE; j++) out[d + j] = I[o + j];
-      };
-      for (const s of full ? this.cells : this.pending) add(s);
-      for (const s of this.movers) add(s);
-      gl.bufferSubData(gl.ARRAY_BUFFER, 0, out, 0, count * STRIDE);
+      // Only what changed goes to the GPU, in runs of neighbouring switches.
+      idx.sort((x, y) => x - y);
+      for (let k = 0; k < idx.length; ) {
+        let j = k;
+        while (j + 1 < idx.length && idx[j + 1] - idx[j] <= 8) j++;
+        gl.bufferSubData(gl.ARRAY_BUFFER, idx[k] * STRIDE * 4, this.I, idx[k] * STRIDE, (idx[j] - idx[k] + 1) * STRIDE);
+        k = j + 1;
+      }
     }
     this.fresh = false;
     this.pending.clear();
@@ -697,6 +694,7 @@ export class GLBoard extends Board {
     gl.uniform2f(u.uSize, this.W, this.H);
     gl.uniform2f(u.uCell, this.cw, this.ch);
     gl.uniform1f(u.uNow, now - this.t0base);
+    gl.uniform1i(u.uFrame, stamp);
     gl.uniform1i(u.uFine, this.fine ? 1 : 0);
     gl.uniform1i(u.uLines, this.lines ? 1 : 0);
     gl.uniform1f(u.uCw, this.cw);
@@ -716,7 +714,7 @@ export class GLBoard extends Board {
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.turnTex);
     gl.bindVertexArray(this.vao);
-    if (count) gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.cells.length);
     // To the screen.
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     gl.blitFramebuffer(0, 0, this.W, this.H, 0, 0, this.W, this.H, gl.COLOR_BUFFER_BIT, gl.NEAREST);

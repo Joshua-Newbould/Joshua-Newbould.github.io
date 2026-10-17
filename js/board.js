@@ -213,7 +213,8 @@ export class Board {
    * thousands of flaps drawing them are a few textures for the GPU, not thousands.
    */
   glyph(f, gm) {
-    let g = this.glyphCache.get(f.gk);
+    const gk = this.glyphKey(f);
+    let g = this.glyphCache.get(gk);
     if (g) return g;
     const { fw, fh } = gm;
     const A = 2048;
@@ -237,8 +238,14 @@ export class Board {
     this.atlasN++;
     g = { c: this.atlas, x, y };
     this.place(this.glyphCanvas(f, gm), g);
-    this.glyphCache.set(f.gk, g);
+    this.glyphCache.set(gk, g);
     return g;
+  }
+
+  /** Which picture a face needs. (Where pictures are tinted as they are drawn, as on the GPU, a
+   *  character is one picture, drawn in white, whatever its colour.) */
+  glyphKey(f) {
+    return this.tints && f.t === 'glyph' ? 'W' + f.ch + '|' + f.w : f.gk;
   }
 
   /** Put a picture into its slot in the atlas. */
@@ -284,7 +291,7 @@ export class Board {
       return c;
     }
     x.font = `${f.w} ${gm.fontPx}px ${MONO}`;
-    x.fillStyle = f.fg;
+    x.fillStyle = this.tints ? '#fff' : f.fg;
     x.textAlign = 'center';
     x.textBaseline = 'alphabetic';
     // Centre capitals on the hinge, as on a real split-flap.
