@@ -207,6 +207,14 @@ export class Board {
     const gk = this.glyphKey(f);
     let g = this.glyphCache.get(gk);
     if (g) return g;
+    if (this.software) {
+      // (Drawn without a GPU, a picture is better kept on its own: writing one into a shared sheet
+      // makes the next read copy the whole sheet.)
+      if (this.glyphCache.size > 4000) this.glyphCache.clear();
+      g = { c: this.glyphCanvas(f, gm), x: 0, y: 0 };
+      this.glyphCache.set(gk, g);
+      return g;
+    }
     const { fw, fh } = gm;
     const A = 2048;
     const sw = fw + 2; // (a pixel round each, so a scaled half never picks up its neighbour)
@@ -693,10 +701,11 @@ export class Board {
   }
 
   tick(now) {
-    // With very many flaps moving at once (a wave across a board of small switches), each flap
-    // still turning is redrawn every other frame, alternate halves of the board in turn; one
-    // starting or landing is always drawn at once.
-    const every = this.active.size > 3000 ? 3 : this.active.size > 1500 ? 2 : 1;
+    // When redrawing every flap in motion would overrun the frame (many at once, or a slow
+    // machine), each flap still turning is redrawn only every `every`th frame, parts of the board
+    // in turn, as many as fit in about 6 ms; one starting or landing is always drawn at once.
+    const every = this.every || 1;
+    const t0 = performance.now();
     this.tickNo = (this.tickNo || 0) + 1;
     for (const s of this.active) {
       let changed = false;
@@ -743,9 +752,12 @@ export class Board {
         if (p >= 1) s.caAnim = null;
         changed = true;
       }
-      if (this.redraws(s, changed, every)) this.draw(s, now);
+      if (this.redraws(s, changed, every) && (changed || performance.now() - t0 < 6)) this.draw(s, now);
       if (!s.anim && !s.q.length && !s.caAnim) this.active.delete(s);
     }
+    // (What drawing them all would cost, smoothed, sets the next frame's share.)
+    this.fullMs = 0.8 * (this.fullMs || 0) + 0.2 * (performance.now() - t0) * every;
+    this.every = Math.max(1, Math.min(6, Math.round(this.fullMs / 6)));
   }
 
   /** Set a flap's edge visibility at once. */

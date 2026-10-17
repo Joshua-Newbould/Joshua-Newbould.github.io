@@ -4,11 +4,11 @@
 // again. Everything here is built for that: the board (board.js), the background (paint.js),
 // the design system and its variations (design.js), and the transitions below.
 
-import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=0e39a73';
-import { GLBoard } from './glboard.js?v=0e39a73';
-import { Paint } from './paint.js?v=0e39a73';
-import { watchCodes } from './secrets.js?v=0e39a73';
-import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=0e39a73';
+import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=d82219c';
+import { GLBoard } from './glboard.js?v=d82219c';
+import { Paint } from './paint.js?v=d82219c';
+import { watchCodes } from './secrets.js?v=d82219c';
+import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=d82219c';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = (s, r = document) => r.querySelector(s);
@@ -182,17 +182,21 @@ function makeBoard() {
     gl.onfail = fallBack;
     return gl;
   }
-  const b = new Board(canvas);
-  if (b.ctx) return b;
-  // (WebGL got as far as the canvas, then failed: a canvas keeps the kind of context it had.)
-  newCanvas();
-  return new Board(canvas);
+  let b = new Board(canvas);
+  if (!b.ctx) {
+    // (WebGL got as far as the canvas, then failed: a canvas keeps the kind of context it had.)
+    newCanvas();
+    b = new Board(canvas);
+  }
+  b.software = paint.lite;
+  return b;
 }
 
 /** The GPU was lost for good: carry on with the board on a 2D canvas. */
 function fallBack() {
   newCanvas();
   board = new Board(canvas);
+  board.software = S.lite;
   if (S.player && S.player !== 'loading') S.player.board = board;
   S.size = '';
   build(false);
@@ -473,10 +477,11 @@ function build(first, face = null) {
     board.gapColor = boardGutter();
     shadeBoard();
     // The page is always laid out on the normal grid. ASCII mode splits each of its switches in
-    // two each way (so cards and bars stay exactly where they are); Bad Apple's are smaller still.
+    // two each way (so cards and bars stay exactly where they are; without a GPU, four times the
+    // switches is too many to draw, and it keeps them whole); Bad Apple's are smaller still.
     const normal = Board.metrics(cssW, cssH, dpr, cellTarget(cssW, cssH), 1.9);
     S.layoutGeom = { ...normal, gap: Math.max(1, Math.round(dpr)) };
-    const m = S.small === 'ascii' ? Board.subdivide(normal, 2) : S.small === 'apple' ? Board.metrics(cssW, cssH, dpr, Math.max(4, cellTarget(cssW, cssH) * (S.lite ? 0.55 : 0.4)), 1.9) : normal;
+    const m = S.small === 'ascii' ? (S.lite ? normal : Board.subdivide(normal, 2)) : S.small === 'apple' ? Board.metrics(cssW, cssH, dpr, Math.max(4, cellTarget(cssW, cssH) * (S.lite ? 0.55 : 0.4)), 1.9) : normal;
     board.configure(m, solid(board.gapColor));
     // (A sweep still crossing the board was for the old switches: the new ones start out in the
     // new colours.)
@@ -882,7 +887,7 @@ function inlinedCss() {
   if (!cssText) {
     cssText = (async () => {
       const xml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-      const css = (await (await fetch('css/style.css?v=0e39a73')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
+      const css = (await (await fetch('css/style.css?v=d82219c')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
       const faces = new Map();
       for (const [block] of css.matchAll(/@font-face\s*{[^}]*}/g)) {
         const url = block.match(/url\("([^"]+)"\)/)[1];
@@ -2370,7 +2375,7 @@ async function playBadApple() {
   let frames;
   let Player;
   try {
-    const mod = await import('./badapple.js?v=0e39a73');
+    const mod = await import('./badapple.js?v=d82219c');
     Player = mod.Player;
     frames = await mod.loadFrames('assets/badapple.bin');
   } catch (err) {
@@ -2475,6 +2480,7 @@ function loop(now) {
 function goLite() {
   if (S.lite) return;
   S.lite = true;
+  if (!board.gl) board.software = true;
   document.documentElement.dataset.lite = '';
   build(false);
 }
