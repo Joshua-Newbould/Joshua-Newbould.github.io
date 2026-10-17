@@ -4,11 +4,10 @@
 // again. Everything here is built for that: the board (board.js), the background (paint.js),
 // the design system and its variations (design.js), and the transitions below.
 
-import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=4acb473';
-import { GLBoard } from './glboard.js?v=4acb473';
-import { Paint } from './paint.js?v=4acb473';
-import { watchCodes } from './secrets.js?v=4acb473';
-import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=4acb473';
+import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=9815574';
+import { GLBoard } from './glboard.js?v=9815574';
+import { Paint } from './paint.js?v=9815574';
+import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=9815574';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = (s, r = document) => r.querySelector(s);
@@ -39,7 +38,7 @@ const themeToggle = $('#theme-toggle');
 const themeSwitches = () => $$('.theme-switch'); // the header's, and the title box's
 /** The theme switch on screen now. */
 const liveSwitch = () => (S.key === 'intro' ? $('#intro-theme') : themeToggle);
-const touchy = matchMedia('(hover: none), (pointer: coarse)'); // a touch screen first (no keyboard for the secret codes)
+const touchy = matchMedia('(hover: none), (pointer: coarse)'); // a touch screen first (bigger tap targets)
 const prevBtn = $('[data-board="prev"]');
 const nextBtn = $('[data-board="next"]');
 
@@ -156,8 +155,7 @@ const S = {
   brush: null,
   lite: false, // no usable GPU (or too slow): bigger switches, a lighter background
   ascii: false, // ASCII mode (the header's >_ button): the background as coloured characters
-  player: null, // Bad Apple!! playing on the board (see badapple.js); 'loading' while it loads
-  small: false, // smaller switches: 'ascii' (half size, two by two to a switch) or 'apple' (Bad Apple)
+  small: false, // smaller switches: 'ascii' (half size, two by two to a switch)
   layoutGeom: null, // the normal board's grid: the page is always laid out on it
 };
 
@@ -199,7 +197,6 @@ function fallBack() {
   newCanvas();
   board = new Board(canvas);
   board.software = S.lite;
-  if (S.player && S.player !== 'loading') S.player.board = board;
   S.size = '';
   build(false);
 }
@@ -480,10 +477,10 @@ function build(first, face = null) {
     shadeBoard();
     // The page is always laid out on the normal grid. ASCII mode splits each of its switches in
     // two each way (so cards and bars stay exactly where they are; without a GPU, four times the
-    // switches is too many to draw, and it keeps them whole); Bad Apple's are smaller still.
+    // switches is too many to draw, and it keeps them whole).
     const normal = Board.metrics(cssW, cssH, dpr, cellTarget(cssW, cssH), 1.9);
     S.layoutGeom = { ...normal, gap: Math.max(1, Math.round(dpr)) };
-    const m = S.small === 'ascii' ? (S.lite ? normal : Board.subdivide(normal, 2)) : S.small === 'apple' ? Board.metrics(cssW, cssH, dpr, Math.max(4, cellTarget(cssW, cssH) * (S.lite ? 0.55 : 0.4)), 1.9) : normal;
+    const m = S.small === 'ascii' && !S.lite ? Board.subdivide(normal, 2) : normal;
     board.configure(m, solid(board.gapColor));
     // (A sweep still crossing the board was for the old switches: the new ones start out in the
     // new colours.)
@@ -502,15 +499,13 @@ function build(first, face = null) {
   schedulePrefetch();
 }
 
-/** The switches the board wants: Bad Apple's while it plays, half-size in ASCII mode, else normal. */
-const smallWanted = () => (S.player ? 'apple' : S.ascii ? 'ascii' : false);
 /**
- * Rebuild the board on other switches, if that changes (or `force`). `smooth`: the new switches
+ * Rebuild the board on other switches, if that changes. `smooth`: the new switches
  * start out showing their piece of the board as it was, bare (no gutters), so nothing visibly
  * changes until a wave turns them over. Returns whether it did that.
  */
-function setSmall(mode, { force = false, smooth = false } = {}) {
-  if (mode === S.small && !force) return false;
+function setSmall(mode, { smooth = false } = {}) {
+  if (mode === S.small) return false;
   const shot = smooth && board.cells.length ? board.capture() : null;
   S.small = mode;
   S.size = '';
@@ -889,7 +884,7 @@ function inlinedCss() {
   if (!cssText) {
     cssText = (async () => {
       const xml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-      const css = (await (await fetch('css/style.css?v=4acb473')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
+      const css = (await (await fetch('css/style.css?v=9815574')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
       const faces = new Map();
       for (const [block] of css.matchAll(/@font-face\s*{[^}]*}/g)) {
         const url = block.match(/url\("([^"]+)"\)/)[1];
@@ -1605,7 +1600,6 @@ function cancelWeb({ keepTheme = false } = {}) {
 }
 
 function go(key, { dir = 1, push = true, origin = null } = {}) {
-  if (S.player) stopBadApple(); // (Back or Forward while Bad Apple plays: it stops first)
   if (!key || key === (goingTo ?? S.key) || !board.cells.length) return;
   const from = S.key;
   dropBrush();
@@ -2276,9 +2270,7 @@ waveToggle.addEventListener('click', () => {
 
 const options = mountOptions(look, pickPalette);
 
-watchCodes({ konami: playBadApple });
 for (const btn of $$('.ascii-btn')) btn.addEventListener('click', toggleAscii);
-$('#apple-toggle').addEventListener('click', playBadApple);
 
 window.addEventListener('keydown', (e) => {
   if (e.altKey || e.ctrlKey || e.metaKey) return;
@@ -2352,7 +2344,7 @@ function toggleAscii() {
   const on = !S.ascii;
   // The new switches start out showing the board as it was; the ripple turns them over into the
   // new look (and size).
-  const held = setSmall(S.player ? 'apple' : on ? 'ascii' : false, { smooth: true });
+  const held = setSmall(on ? 'ascii' : false, { smooth: true });
   const sweepFrom = scheme();
   const gapFrom = board.gapColor;
   const fromFrame = S.frame;
@@ -2363,55 +2355,6 @@ function toggleAscii() {
   startSweep(sweepFrom, motionField('ripple'), -SWEEP_BAND / 2, gapFrom, fromFrame);
   S.sweep.asciiOld.fill(S.ascii ? 0 : 1); // (ahead of the front, switches keep the old look)
   S.sweep.hold = held; // (and hold the old board's picture until it arrives)
-}
-
-/**
- * The Konami code: Bad Apple!! plays on the board, on smaller switches, with the background
- * carrying on around it. Esc, a click or a tap stops it; other keys wait until it is over.
- */
-async function playBadApple() {
-  if (S.player || reduce.matches) return; // (a flashing video: not with reduced motion)
-  if (pendingApply || goingTo || S.overlay) return void setTimeout(playBadApple, 250); // (once the running transition is done)
-  S.player = 'loading';
-  let frames;
-  let Player;
-  try {
-    const mod = await import('./badapple.js?v=4acb473');
-    Player = mod.Player;
-    frames = await mod.loadFrames('assets/badapple.bin');
-  } catch (err) {
-    console.warn('Bad Apple!! could not load', err);
-    S.player = null;
-    return;
-  }
-  dropBrush();
-  restoreBrushBoxes(true);
-  document.documentElement.classList.add('playing');
-  setSmall('apple', { force: true });
-  S.player = new Player(board, frames, { dark: solid('#0b0d10'), light: solid('#eef1f5'), rippleMs: WAVE_MS, onEnd: stopBadApple });
-  addEventListener('keydown', playerKeys, true);
-  addEventListener('pointerdown', stopBadApple, true);
-}
-function playerKeys(e) {
-  if (e.key === 'Escape') stopBadApple();
-  else if (!/^(Tab|F\d+)$/.test(e.key)) e.stopImmediatePropagation(); // (the site's keys wait)
-}
-function stopBadApple(e) {
-  if (!S.player || S.player === 'loading') return;
-  // (The click that stopped it does nothing else; a press that makes no click arms nothing for long.)
-  if (e?.type === 'pointerdown' && e.button === 0) {
-    const eat = (c) => c.stopImmediatePropagation();
-    addEventListener('click', eat, { capture: true, once: true });
-    setTimeout(() => removeEventListener('click', eat, true), 600);
-  }
-  removeEventListener('keydown', playerKeys, true);
-  removeEventListener('pointerdown', stopBadApple, true);
-  S.player.release();
-  S.player = null;
-  setSmall(smallWanted(), { force: true });
-  // The page comes back the way it first arrives: switching in from the background.
-  webGo(() => {}, { fromNothing: true });
-  document.documentElement.classList.remove('playing');
 }
 
 /** Without motion: the background takes its new colours and gutters at once. */
@@ -2466,7 +2409,6 @@ function loop(now) {
     sweepStep(now);
   }
   watchFrames(now);
-  if (S.player && S.player !== 'loading') S.player.step(now);
   const b = S.brush;
   if (b && b.painting && b.last >= 0 && now - b.lastSplash >= RESPLASH_MS) {
     splash(b.px ?? b.x, b.py ?? b.y, true);

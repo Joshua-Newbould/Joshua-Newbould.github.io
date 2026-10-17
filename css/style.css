@@ -294,15 +294,14 @@ html:not(.js) .foot-opt {
 
 /* ---------- Sun / moon switch ---------- */
 
-/* The header's tools: Bad Apple (touch screens), ASCII mode and the sun/moon switch. */
+/* The header's tools: ASCII mode and the sun/moon switch. */
 .tools {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
 }
-.tool-btn,
-.secret-btn {
+.tool-btn {
   display: grid;
   place-items: center;
   width: 26px;
@@ -312,8 +311,7 @@ html:not(.js) .foot-opt {
   box-shadow: inset 0 0 0 1px var(--line);
   color: var(--muted);
 }
-.tool-btn svg,
-.secret-btn svg {
+.tool-btn svg {
   width: 14px;
   height: 14px;
   fill: none;
@@ -322,28 +320,18 @@ html:not(.js) .foot-opt {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-/* Bad Apple's button only on touch screens (elsewhere the code is typed). */
-.js .secret-btn {
-  display: none;
-}
-.js[data-vp~="touch"] .secret-btn {
-  display: grid;
-}
-.tool-btn:hover,
-.secret-btn:hover {
+.tool-btn:hover {
   background: color-mix(in srgb, var(--text) 8%, var(--surface));
   box-shadow: inset 0 0 0 1px var(--muted);
   color: var(--text);
 }
-.tool-btn[aria-pressed="true"],
-.secret-btn[aria-pressed="true"] {
+.tool-btn[aria-pressed="true"] {
   background: var(--text);
   color: var(--surface);
   box-shadow: none;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .tool-btn,
-  .secret-btn {
+  .tool-btn {
     transition: background 0.2s, color 0.2s;
   }
 }
@@ -1094,7 +1082,6 @@ html:not(.js) #board,
 html:not(.js) #enter,
 html:not(.js) .theme-switch,
 html:not(.js) .tool-btn,
-html:not(.js) .secret-btn,
 html:not(.js) .foot-nav {
   display: none;
 }
@@ -1153,11 +1140,6 @@ html:not(.js) footer {
   color: var(--muted);
 }
 
-/* While Bad Apple!! plays on the board (the Konami code), the page steps aside. */
-.playing #source,
-.playing .card-shadow {
-  visibility: hidden;
-}
 
 /* The nav shows focus as a soft wash. */
 .js #site-nav a:focus-visible {
@@ -1171,7 +1153,7 @@ html:not(.js) footer {
   .js :is(.foot-nav button, .foot-opt, .w-pager button:not(:disabled), #site-nav a):active {
     transform: translateY(1px);
   }
-  .js :is(.tool-btn, .secret-btn, .theme-switch):active {
+  .js :is(.tool-btn, .theme-switch):active {
     transform: scale(0.94);
   }
 }
