@@ -123,7 +123,7 @@ body {
 }
 .js :focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline-offset: 3px; /* one focus language: a 2px accent ring, 3px out */
 }
 .js [tabindex="-1"]:focus {
   outline: none;
@@ -146,6 +146,7 @@ body {
   padding: 0 calc(var(--inset, 2rem) + var(--pad-x));
   padding-top: var(--cut, 0px); /* (the board's top row may be cut: the content sits below it) */
   background: var(--bar);
+  box-shadow: inset 0 -1px 0 var(--line); /* a hairline against the content */
 }
 #site-name {
   font: 600 11.5px/1 var(--mono);
@@ -159,6 +160,7 @@ body {
   display: flex;
   gap: 1.9rem;
   margin-left: auto;
+  counter-reset: nav;
 }
 #site-nav a {
   position: relative;
@@ -194,13 +196,16 @@ body {
   gap: 1rem;
   padding: 0 calc(var(--inset, 2rem) + var(--pad-x));
   background: var(--bar);
+  box-shadow: inset 0 1px 0 var(--line);
   font: 500 10.5px/1 var(--mono);
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--muted);
 }
 .js #site > footer p {
+  grid-column: 1;
   margin: 0;
+  white-space: nowrap;
 }
 .sep {
   margin: 0 0.6em;
@@ -217,6 +222,15 @@ body {
    its arrow beside its label and both packed towards the middle of the pair. */
 .foot-nav button {
   min-width: calc(12ch + 12 * 0.18em + 1.8em);
+  padding: 10px 4px;
+  margin: -10px -4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7em;
+  white-space: nowrap;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--muted);
 }
 .foot-nav [data-board="prev"] {
   justify-content: flex-start;
@@ -230,17 +244,6 @@ body {
 .js #site > footer.arrows .foot-nav button {
   min-width: 30px;
   justify-content: center;
-}
-.foot-nav button {
-  padding: 10px 4px;
-  margin: -10px -4px;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.7em;
-  white-space: nowrap;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  color: var(--muted);
 }
 .foot-nav button:hover {
   color: var(--text);
@@ -280,25 +283,8 @@ html:not(.js) .foot-opt {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.js #publications li:last-child {
-  padding-bottom: 0;
-}
-
-
-/* ---------- Header & footer styles ---------- */
-
-/* Hairline: flat, full width, a single rule against the content. */
-#site > header {
-  box-shadow: inset 0 -1px 0 var(--line);
-}
-#site > footer {
-  box-shadow: inset 0 1px 0 var(--line);
-}
 
 /* The nav's page numbers (01 About, 02 Research, …). */
-#site-nav {
-  counter-reset: nav;
-}
 .js #site-nav a::before {
   counter-increment: nav;
   content: "0" counter(nav) " ";
@@ -308,7 +294,7 @@ html:not(.js) .foot-opt {
 
 /* ---------- Sun / moon switch ---------- */
 
-/* The header's tools: the paint brush (off until pressed) and the sun/moon switch. */
+/* The header's tools: Bad Apple (touch screens), ASCII mode and the sun/moon switch. */
 .tools {
   display: flex;
   align-items: center;
@@ -330,9 +316,6 @@ html:not(.js) .foot-opt {
 .secret-btn svg {
   width: 14px;
   height: 14px;
-}
-.tool-btn svg,
-.secret-btn svg {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.5;
@@ -358,24 +341,17 @@ html:not(.js) .foot-opt {
   color: var(--surface);
   box-shadow: none;
 }
-.tool-btn:focus-visible,
-.secret-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
 @media (prefers-reduced-motion: no-preference) {
   .tool-btn,
-.secret-btn {
+  .secret-btn {
     transition: background 0.2s, color 0.2s;
   }
 }
-/* While the brush is on, the board and cards show where it will paint. */
 /* The board takes the brush (a hold or drag paints; a click ripples into new colours). */
 .js #board {
   cursor: crosshair;
 }
 
-.js .theme-switch,
 .theme-switch {
   flex-shrink: 0;
   line-height: 0;
@@ -455,8 +431,9 @@ html:not(.js) .foot-opt {
 .js main section[data-page] {
   container-type: inline-size; /* (titles and grids follow the card's width, also in snapshots) */
   overflow: hidden; /* contents fit or split into parts (see the script); pages never scroll */
-  padding: var(--pad-y) var(--pad-x);
+  padding: 0 var(--pad-x) var(--pad-y);
   background: var(--surface);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 45%, var(--surface));
 }
 .w-fit {
   display: block;
@@ -469,18 +446,6 @@ html:not(.js) .foot-opt {
   height: 1px;
   overflow: hidden;
   clip-path: inset(50%);
-}
-.w-index {
-  margin: 0 0 16px;
-  font: 500 10.5px/1 var(--mono);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-.w-index b {
-  font-weight: 500;
-  color: var(--accent);
-  margin-right: 0.9em;
 }
 .w-big {
   margin: 0 0 6px; /* the title groups with the line under it */
@@ -572,6 +537,9 @@ html:not(.js) .foot-opt {
   padding: 16px 0;
   border-top: 1px solid var(--line);
 }
+.js #publications li:last-child {
+  padding-bottom: 0;
+}
 .js #publications .w-year {
   grid-column: 1;
   grid-row: 1 / span 3;
@@ -591,9 +559,6 @@ html:not(.js) .foot-opt {
   font-weight: 600;
   color: var(--text);
   text-decoration: none;
-}
-.js .pub-title {
-  text-wrap: pretty;
 }
 .js .pub-title:hover,
 .js .pub-title:focus-visible {
@@ -684,12 +649,17 @@ html:not(.js) .foot-opt {
 
 /* ---------- Title screen ---------- */
 
+/* The title sits in a window in the centre of the board: the strip across its top, the status
+   line along its foot. */
 .js #intro {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 0 calc(var(--inset, 2rem) + var(--pad-x));
+  align-items: center;
+  padding: 52px 48px 50px;
+  text-align: center;
   background: var(--surface);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 45%, var(--surface));
 }
 .js #intro h1 {
   margin: 0;
@@ -730,33 +700,15 @@ html:not(.js) .foot-opt {
   outline: 1px solid var(--accent);
   outline-offset: 2px;
 }
-/* The title sits in a box in the centre of the board. */
-.js #intro {
-  padding: 0 48px;
-  align-items: center;
-  text-align: center;
-}
 
 /* ---------- Sections as windows ----------
    A quiet nod to a ship's terminal: a hairline frame, a slim title strip (status light, path,
    four short stripes in the page's colours) and a status line along the bottom. */
 
-.w-bar,
-.w-statusline {
-  display: none;
-}
-.js main section[data-page] {
-  padding-top: 0;
-  box-shadow: inset 0 0 0 1px var(--line);
-}
 .js[data-vp] main section[data-page] {
   padding-bottom: 50px;
 }
-.js .w-index {
-  display: none; /* the title strip says where you are */
-}
-.js .w-bar,
-.js #intro .w-bar {
+.js .w-bar {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -802,8 +754,7 @@ html:not(.js) .foot-opt {
 .w-stripes i:nth-child(4) {
   background: var(--st4);
 }
-.js .w-statusline,
-.js #intro .w-statusline {
+.js .w-statusline {
   position: absolute;
   left: var(--pad-x);
   bottom: 19px;
@@ -824,9 +775,6 @@ html:not(.js) .foot-opt {
 .js :is(main, #intro) .w-path b {
   color: var(--surface);
 }
-.js main section[data-page] {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 45%, var(--surface));
-}
 .js main .w-statusline::before,
 .js #intro .w-statusline span:first-child::before {
   content: ">_";
@@ -837,15 +785,6 @@ html:not(.js) .foot-opt {
   margin-right: 10px;
 }
 
-/* The title box as a window: the strip across its top, the status line along its foot. */
-.js #intro {
-  padding-top: 52px;
-  padding-bottom: 50px;
-  box-shadow: inset 0 0 0 1px var(--line);
-}
-.js #intro {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 45%, var(--surface));
-}
 .js #intro .w-bar {
   position: absolute;
   top: 0;
@@ -858,10 +797,6 @@ html:not(.js) .foot-opt {
 .js #intro .theme-switch,
 .js #intro .w-bar button {
   margin-left: 10px;
-}
-.js #intro .w-bar .tool-btn {
-  width: 22px;
-  height: 22px;
 }
 .js[data-vp~="short"] #intro .theme-switch,
 .js[data-vp~="short"] #intro .w-bar button {
@@ -913,7 +848,7 @@ html:not(.js) .foot-opt {
   -webkit-user-select: none !important;
 }
 
-/* ---------- Design options panel (for reviewing the variations) ---------- */
+/* ---------- Design options panel (for reviewing the palettes) ---------- */
 
 #design-options {
   position: fixed;
@@ -989,9 +924,6 @@ html:not(.js) .foot-opt {
 .js #site > header:not(.stack) .tools {
   justify-self: end;
 }
-.js #site > footer p {
-  grid-column: 1;
-}
 .js #site > footer .foot-opt {
   grid-column: 2;
 }
@@ -1040,12 +972,9 @@ html:not(.js) .foot-opt {
 .js #site > header.tight #site-nav a {
   letter-spacing: 0.08em;
 }
-/* The Frame style's page numbers would crowd tight labels. */
+/* The page numbers would crowd tight labels. */
 .js #site > header.tight #site-nav a::before {
   display: none;
-}
-.js #site > footer p {
-  white-space: nowrap;
 }
 .js #site > footer.nocopy p {
   display: none;
@@ -1075,8 +1004,7 @@ html:not(.js) .foot-opt {
 .js[data-vp~="short"] main [data-strip] {
   display: none;
 }
-.js[data-vp~="short"] .w-bar,
-.js[data-vp~="short"] #intro .w-bar {
+.js[data-vp~="short"] .w-bar {
   height: 22px;
 }
 .js[data-vp~="short"] main .w-statusline {
@@ -1106,6 +1034,7 @@ html:not(.js) .foot-opt {
   font-variant-numeric: tabular-nums;
 }
 .w-pager button {
+  position: relative;
   display: grid;
   place-items: center;
   width: 30px;
@@ -1122,9 +1051,6 @@ html:not(.js) .foot-opt {
   color: var(--muted);
   opacity: 0.35;
   cursor: default;
-}
-.w-pager button {
-  position: relative;
 }
 .js[data-vp~="touch"] .w-pager button::before {
   content: "";
@@ -1233,10 +1159,7 @@ html:not(.js) footer {
   visibility: hidden;
 }
 
-/* One focus language: a 2px accent ring, 3px out; the nav shows focus as a soft wash. */
-.js :focus-visible {
-  outline-offset: 3px;
-}
+/* The nav shows focus as a soft wash. */
 .js #site-nav a:focus-visible {
   outline: none;
   border-radius: 3px;

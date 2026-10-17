@@ -253,11 +253,6 @@ function applyColours(key = S.key) {
 
 const hexToRgb = (h) => [1, 3, 5].map((k) => parseInt(h.slice(k, k + 2), 16));
 const rgbHex = (r, g, b) => '#' + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
-const mixHex = (a, b, t) => {
-  const p = hexToRgb(a);
-  const q = hexToRgb(b);
-  return rgbHex(...p.map((v, k) => Math.round(v + (q[k] - v) * t)));
-};
 // The same blend in OKLab, where halfway between two colours looks halfway (no muddy dip).
 // (By table: these run for every switch in a wave. The way back is indexed by the square root,
 // so dark colours, where sRGB is steepest, are finely spaced.)

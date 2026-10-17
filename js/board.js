@@ -90,15 +90,6 @@ export class Board {
     return q * q * (3 - 2 * q);
   }
 
-  /** Change the colour of the gutters between flaps at once (on start-up).
-   *  To change it in a wave, pass `gap` to flip() instead. */
-  setGap(color) {
-    if (color === this.gapColor) return;
-    this.gapColor = color;
-    for (const c of this.cells) c.gap = null;
-    if (this.cells.length) this.redrawAll();
-  }
-
   /** The flip's shading for the current gutter colour. A switch shades its flips to match its
    *  own gutter, so one that keeps its old gutter until a wave reaches it keeps its old tint too. */
   setShade(shade, k) {
@@ -755,14 +746,6 @@ export class Board {
       if (this.redraws(s, changed, every)) this.draw(s, now);
       if (!s.anim && !s.q.length && !s.caAnim) this.active.delete(s);
     }
-  }
-
-  /** Fade a flap's edges (gutter, corners, hinge) to `to` (0 = bare, 1 = a normal switch). */
-  fadeEdges(s, to, { delay = 0, dur = 200 } = {}) {
-    if (typeof s === 'number') s = this.cells[s];
-    // `from` is read when the fade starts, in case another fade was still running.
-    s.caAnim = { t0: performance.now() + delay, dur, from: null, to };
-    this.active.add(s);
   }
 
   /** Set a flap's edge visibility at once. */
