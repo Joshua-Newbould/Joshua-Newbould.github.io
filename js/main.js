@@ -4,11 +4,11 @@
 // again. Everything here is built for that: the board (board.js), the background (paint.js),
 // the design system and its variations (design.js), and the transitions below.
 
-import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=3e2e3fc';
-import { GLBoard } from './glboard.js?v=3e2e3fc';
-import { Paint } from './paint.js?v=3e2e3fc';
-import { watchCodes } from './secrets.js?v=3e2e3fc';
-import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=3e2e3fc';
+import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=fb17f6c';
+import { GLBoard } from './glboard.js?v=fb17f6c';
+import { Paint } from './paint.js?v=fb17f6c';
+import { watchCodes } from './secrets.js?v=fb17f6c';
+import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=fb17f6c';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = (s, r = document) => r.querySelector(s);
@@ -889,7 +889,7 @@ function inlinedCss() {
   if (!cssText) {
     cssText = (async () => {
       const xml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-      const css = (await (await fetch('css/style.css?v=3e2e3fc')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
+      const css = (await (await fetch('css/style.css?v=fb17f6c')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
       const faces = new Map();
       for (const [block] of css.matchAll(/@font-face\s*{[^}]*}/g)) {
         const url = block.match(/url\("([^"]+)"\)/)[1];
@@ -2293,20 +2293,11 @@ window.addEventListener('keydown', (e) => {
     enter();
     return;
   }
-  if (e.key === 'ArrowRight') {
-    e.preventDefault();
-    step(1);
-  } else if (e.key === 'ArrowLeft') {
-    e.preventDefault();
-    step(-1);
-  } else if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') {
-    // Through a card's parts (the page never scrolls).
-    e.preventDefault();
-    goPart(1);
-  } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
-    e.preventDefault();
-    goPart(-1);
-  }
+  // Left and right through the pages; up and down through a card's parts (the page never scrolls).
+  const act = { ArrowRight: () => step(1), ArrowLeft: () => step(-1), ArrowDown: () => goPart(1), PageDown: () => goPart(1), ' ': () => goPart(1), ArrowUp: () => goPart(-1), PageUp: () => goPart(-1) }[e.key];
+  if (!act) return;
+  e.preventDefault();
+  act();
 });
 
 // Parts: the controls on the card, the mouse wheel over it, and a quick flick on touch screens.
@@ -2381,7 +2372,7 @@ async function playBadApple() {
   let frames;
   let Player;
   try {
-    const mod = await import('./badapple.js?v=3e2e3fc');
+    const mod = await import('./badapple.js?v=fb17f6c');
     Player = mod.Player;
     frames = await mod.loadFrames('assets/badapple.bin');
   } catch (err) {
