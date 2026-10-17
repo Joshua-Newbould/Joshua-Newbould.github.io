@@ -8,7 +8,7 @@
 // no JavaScript between starting and landing.
 // Anything that goes wrong here falls back to drawing nothing new, never to throwing: main.js
 // swaps in the 2D board if the GPU is lost for good (see onfail).
-import { Board } from './board.js?v=d82219c';
+import { Board } from './board.js?v=96c868f';
 
 const STRIDE = 28; // int32s per switch (see encode)
 const SOURCES = 12; // pictures (sections' snapshots, the old board) bound at once: units 3…14

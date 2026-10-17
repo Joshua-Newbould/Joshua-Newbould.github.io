@@ -283,7 +283,8 @@ export const gutter = (dark, look, page = 'intro') => {
 // ---------------------------------------------------------------------------
 // Palette panel (for reviewing the palettes)
 
-export function mountOptions(look, onChange) {
+/** The panel, its buttons calling `onPick(palette)`. */
+export function mountOptions(look, onPick) {
   const panel = document.createElement('div');
   panel.id = 'design-options';
   panel.setAttribute('role', 'dialog');
@@ -295,10 +296,8 @@ export function mountOptions(look, onChange) {
     const b = Object.assign(document.createElement('button'), { type: 'button', textContent: p.label });
     b.addEventListener('click', () => {
       if (look.palette === value) return;
-      look.palette = value;
-      saveLook(look);
+      onPick(value);
       mark();
-      onChange();
     });
     row.append(b);
   }

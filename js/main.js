@@ -4,11 +4,11 @@
 // again. Everything here is built for that: the board (board.js), the background (paint.js),
 // the design system and its variations (design.js), and the transitions below.
 
-import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=d82219c';
-import { GLBoard } from './glboard.js?v=d82219c';
-import { Paint } from './paint.js?v=d82219c';
-import { watchCodes } from './secrets.js?v=d82219c';
-import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=d82219c';
+import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=96c868f';
+import { GLBoard } from './glboard.js?v=96c868f';
+import { Paint } from './paint.js?v=96c868f';
+import { watchCodes } from './secrets.js?v=96c868f';
+import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=96c868f';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = (s, r = document) => r.querySelector(s);
@@ -887,7 +887,7 @@ function inlinedCss() {
   if (!cssText) {
     cssText = (async () => {
       const xml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-      const css = (await (await fetch('css/style.css?v=d82219c')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
+      const css = (await (await fetch('css/style.css?v=96c868f')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
       const faces = new Map();
       for (const [block] of css.matchAll(/@font-face\s*{[^}]*}/g)) {
         const url = block.match(/url\("([^"]+)"\)/)[1];
@@ -2264,7 +2264,7 @@ waveToggle.addEventListener('click', () => {
   layoutWeb();
 });
 
-const options = mountOptions(look, onLookChange);
+const options = mountOptions(look, pickPalette);
 
 watchCodes({ konami: playBadApple });
 for (const btn of $$('.ascii-btn')) btn.addEventListener('click', toggleAscii);
@@ -2375,7 +2375,7 @@ async function playBadApple() {
   let frames;
   let Player;
   try {
-    const mod = await import('./badapple.js?v=d82219c');
+    const mod = await import('./badapple.js?v=96c868f');
     Player = mod.Player;
     frames = await mod.loadFrames('assets/badapple.bin');
   } catch (err) {
@@ -2424,31 +2424,31 @@ function settleBackground() {
 /** The board ripples from `origin` into the page's next colour combo. */
 function pulseCombo(origin) {
   if (pendingApply || goingTo || S.overlay || S.sweep) return; // (not over a transition still running)
-  const page = S.key;
-  const n = combosOf(page, look).length || 1;
+  const n = combosOf(S.key, look).length || 1;
+  recolour(() => setCombo(S.key, (comboOf(S.key) + 1) % n), motionField('ripple', 1, origin));
+}
+
+/** The palette picked in the review panel: the board sweeps into it. */
+function pickPalette(value) {
+  cancelWeb();
+  recolour(() => {
+    look.palette = value;
+    saveLook(look);
+    shotCache.clear();
+  }, motionField('sweep', 1));
+}
+
+/** New colours for the page (`change`), the background sweeping into them along `field`. */
+function recolour(change, field) {
   const sweepFrom = scheme();
   const gapFrom = board.gapColor;
   const fromFrame = S.frame;
-  setCombo(page, (comboOf(page) + 1) % n);
+  change();
   applyColours();
   retintGutter();
   S.frame = paint.frame(scheme());
   if (reduce.matches) settleBackground();
-  else startSweep(sweepFrom, motionField('ripple', 1, origin), -SWEEP_BAND / 2, gapFrom, fromFrame);
-  schedulePrefetch();
-}
-
-/** The palette changed (from the review panel). */
-function onLookChange() {
-  cancelWeb();
-  shotCache.clear();
-  board.gapColor = boardGutter();
-  syncDom();
-  S.frame = paint.frame(scheme());
-  S.lastStep = performance.now();
-  // A gentle sweep of the background into the new palette.
-  const field = motionField('sweep', 1);
-  retarget(allCells(), (i) => ({ delay: field.tau(...cellCentre(i)) + rand() * 120, dur: 320, gap: board.gapColor }), () => true);
+  else startSweep(sweepFrom, field, -SWEEP_BAND / 2, gapFrom, fromFrame);
   schedulePrefetch();
 }
 
