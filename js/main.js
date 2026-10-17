@@ -4,11 +4,11 @@
 // again. Everything here is built for that: the board (board.js), the background (paint.js),
 // the design system and its variations (design.js), and the transitions below.
 
-import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=babd46c';
-import { GLBoard } from './glboard.js?v=babd46c';
-import { Paint } from './paint.js?v=babd46c';
-import { watchCodes } from './secrets.js?v=babd46c';
-import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=babd46c';
+import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=3e2e3fc';
+import { GLBoard } from './glboard.js?v=3e2e3fc';
+import { Paint } from './paint.js?v=3e2e3fc';
+import { watchCodes } from './secrets.js?v=3e2e3fc';
+import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=3e2e3fc';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = (s, r = document) => r.querySelector(s);
@@ -889,7 +889,7 @@ function inlinedCss() {
   if (!cssText) {
     cssText = (async () => {
       const xml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-      const css = (await (await fetch('css/style.css?v=babd46c')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
+      const css = (await (await fetch('css/style.css?v=3e2e3fc')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
       const faces = new Map();
       for (const [block] of css.matchAll(/@font-face\s*{[^}]*}/g)) {
         const url = block.match(/url\("([^"]+)"\)/)[1];
@@ -2381,7 +2381,7 @@ async function playBadApple() {
   let frames;
   let Player;
   try {
-    const mod = await import('./badapple.js?v=babd46c');
+    const mod = await import('./badapple.js?v=3e2e3fc');
     Player = mod.Player;
     frames = await mod.loadFrames('assets/badapple.bin');
   } catch (err) {

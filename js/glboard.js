@@ -8,7 +8,7 @@
 // no JavaScript between starting and landing.
 // Anything that goes wrong here falls back to drawing nothing new, never to throwing: main.js
 // swaps in the 2D board if the GPU is lost for good (see onfail).
-import { Board } from './board.js?v=babd46c';
+import { Board } from './board.js?v=3e2e3fc';
 
 const STRIDE = 28; // int32s per switch (see encode)
 const SOURCES = 12; // pictures (sections' snapshots, the old board) bound at once: units 3…14
@@ -674,11 +674,12 @@ export class GLBoard extends Board {
       const idx = [];
       for (const s of this.pending) if (this.cells[s.i] === s) (this.encode(s, stamp), idx.push(s.i)); // (not one from before a new grid)
       if (this.all) return this.frame(now);
-      // Only what changed goes to the GPU, in runs of neighbouring switches.
+      // Only what changed goes to the GPU, in runs of nearby switches (a few unchanged ones
+      // between cost less than another upload).
       idx.sort((x, y) => x - y);
       for (let k = 0; k < idx.length; ) {
         let j = k;
-        while (j + 1 < idx.length && idx[j + 1] - idx[j] <= 8) j++;
+        while (j + 1 < idx.length && idx[j + 1] - idx[j] <= 64) j++;
         gl.bufferSubData(gl.ARRAY_BUFFER, idx[k] * STRIDE * 4, this.I, idx[k] * STRIDE, (idx[j] - idx[k] + 1) * STRIDE);
         k = j + 1;
       }
