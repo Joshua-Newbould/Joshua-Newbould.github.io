@@ -395,8 +395,9 @@ function staggerMemory(c, k, ago) {
 const recentPast = () => paint.frame(scheme(), true).rgb;
 
 /** Bring switches up to date. `how(i, face)` returns flip options, or null to switch at once.
- *  `force(i)` flips a switch even if its face hasn't changed. */
-function retarget(indices, how, force = null) {
+ *  `force(i)` flips a switch even if its face hasn't changed. `face(c)` puts another face on a
+ *  background switch than its colour (its memory of that colour is then not staggered). */
+function retarget(indices, how, force = null, face = null) {
   const pk = 'paint:' + scheme().name + (S.dark ? 'd' : 'l') + look.palette;
   let ago = null;
   for (const i of indices) {
@@ -413,8 +414,8 @@ function retarget(indices, how, force = null) {
     c.key = key;
     c.abs = abs;
     if (S.sweep) S.sweep.turned[i] = 1; // (flipped here, so the sweep's front leaves it be)
-    if (isPaint(abs)) rememberPaint(c, (ago ||= recentPast()));
-    const f = concrete(abs, i);
+    if (isPaint(abs)) rememberPaint(c, !face && (ago ||= recentPast()));
+    const f = (isPaint(abs) && face?.(c)) || concrete(abs, i);
     const opts = how && !reduce.matches ? how(i, f) : null;
     if (opts) board.flip(c, f, opts);
     else board.set(c, f);
@@ -473,7 +474,9 @@ function cellTarget(w, h) {
   return S.lite ? base * 1.3 : base;
 }
 
-function build(first) {
+/** Lay the board out for the window (if that changed). `face(c)`: what its background switches
+ *  first show, if not their colours (see retarget). */
+function build(first, face = null) {
   const cssW = document.documentElement.clientWidth || window.innerWidth;
   const cssH = window.innerHeight;
   const dpr = Math.min(window.devicePixelRatio || 1, S.lite ? 1.5 : 2);
@@ -502,7 +505,7 @@ function build(first) {
     paint.resize(board, S.small, S.pt);
     S.frame = paint.frame(scheme());
     S.lastStep = performance.now();
-    retarget(allCells(), null);
+    retarget(allCells(), null, null, face);
   } finally {
     board.release();
   }
@@ -528,16 +531,13 @@ function setSmall(mode, { force = false, smooth = false } = {}) {
     build(false);
     return false;
   }
+  const src = imageSource(shot);
   board.hold(); // (the new board is drawn once, already showing the old one's picture)
   try {
-    build(false);
-    const src = imageSource(shot);
-    const rgb = S.frame.rgb;
-    for (const c of board.cells) {
-      if (!isPaint(c.abs)) continue;
-      board.set(c, slice(src, c.x, c.y, rgbHex(rgb[c.i * 3], rgb[c.i * 3 + 1], rgb[c.i * 3 + 2])));
-      board.setEdges(c, 0);
-    }
+    build(false, (c) => {
+      c.ca = 0;
+      return slice(src, c.x, c.y, rgbHex(c.r, c.g, c.b));
+    });
   } finally {
     board.release();
   }
