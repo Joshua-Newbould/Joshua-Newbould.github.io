@@ -205,7 +205,7 @@ export class Paint {
     this.g = g;
     if (same) {
       // (Same samples, another number to a switch: the patterns carry over.)
-      for (const f of [this.field, ...this.past]) if (f) (f.k = k), f.cache.clear();
+      for (const f of [this.field, ...this.past]) if (f) (f.k = k), f.cache.clear(), f.blocks?.clear();
       return;
     }
     this.field = null;
@@ -352,24 +352,24 @@ export class Paint {
   }
 
   /** The background in a scheme's pigments: one RGB triple per switch (row by row, top first), from
-   *  the latest pattern, or (`ago`) one about three seconds older. The same object for the same
-   *  pattern and scheme. */
-  frame(scheme, ago = false) {
+   *  the latest pattern, or (`ago`) one about three seconds older. `blocks`: on a board of small
+   *  switches, one per 2×2 of them, as a board of normal switches shows it (with its light). The
+   *  same object for the same pattern and scheme. */
+  frame(scheme, ago = false, blocks = false) {
     let f = this.field;
     if (ago) f = this.past.findLast((p) => p.t <= this.field.t - 0.1) || this.past[0] || f;
-    let out = f.cache.get(scheme);
+    const cache = blocks ? (f.blocks ||= new Map()) : f.cache;
+    let out = cache.get(scheme);
     if (out) return out;
-    out = { rgb: this.colours(f, scheme) };
-    if (f.cache.size > 8) f.cache.clear();
-    f.cache.set(scheme, out);
+    out = { rgb: blocks ? this.colours(f, scheme, f.k * 2, !!f.L) : this.colours(f, scheme) };
+    if (cache.size > 8) cache.clear();
+    cache.set(scheme, out);
     return out;
   }
 
-  colours(f, scheme) {
+  colours(f, scheme, k = f.k, lit = f.L && !this.plain) {
     const pig = scheme.pigments.map(hexToVec).flat();
     const spec = scheme.spec ?? 0.1;
-    const { k } = f;
-    const lit = f.L && !this.plain;
     const cols = f.cols / k;
     const rows = f.rows / k;
     const n = k * k;

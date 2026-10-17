@@ -4,10 +4,10 @@
 // again. Everything here is built for that: the board (board.js), the background (paint.js),
 // the design system and its variations (design.js), and the transitions below.
 
-import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=57eec90';
-import { GLBoard } from './glboard.js?v=57eec90';
-import { Paint } from './paint.js?v=57eec90';
-import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=57eec90';
+import { Board, blank, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=dfdae3a';
+import { GLBoard } from './glboard.js?v=dfdae3a';
+import { Paint } from './paint.js?v=dfdae3a';
+import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=dfdae3a';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = (s, r = document) => r.querySelector(s);
@@ -194,6 +194,8 @@ function makeBoard() {
 
 /** The GPU was lost for good: carry on with the board on a 2D canvas. */
 function fallBack() {
+  S.morph = null; // (the new board starts afresh on whole groups)
+  if (S.small) S.small = S.ascii ? 'ascii' : false;
   newCanvas();
   board = new Board(canvas);
   board.software = S.lite;
@@ -331,10 +333,15 @@ const luma = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
 function frameLuma() {
   const fr = S.frame;
   if (!fr.luma) {
-    const ls = [];
-    for (let k = 0; k < fr.rgb.length; k += 3 * 5) ls.push(luma(fr.rgb[k], fr.rgb[k + 1], fr.rgb[k + 2]));
-    ls.sort((a, b) => a - b);
-    fr.luma = [ls[Math.floor(ls.length * 0.05)] ?? 0, ls[Math.floor(ls.length * 0.95)] ?? 255];
+    // (By histogram, every fifth switch: a sort of them all took a while on a big board.)
+    const bins = new Uint32Array(256);
+    let n = 0;
+    for (let k = 0; k < fr.rgb.length; k += 3 * 5, n++) bins[Math.round(luma(fr.rgb[k], fr.rgb[k + 1], fr.rgb[k + 2]))]++;
+    const at = (q) => {
+      for (let v = 0, sum = 0; v < 256; v++) if ((sum += bins[v]) > q * n) return v;
+      return 255;
+    };
+    fr.luma = n ? [at(0.05), at(0.95)] : [0, 255];
   }
   return fr.luma;
 }
@@ -355,8 +362,9 @@ function rememberPaint(c, ago = null) {
 /**
  * After a transition every switch shows exactly the current colour, so none would be due to
  * flip again until they all were at once. In steady drift each switch is anywhere between
- * "just flipped" and "about to": set its remembered colour a uniformly random fraction of the
- * flip threshold behind, along the way its colour is moving, so the drift carries on unbroken.
+ * "just flipped" and "about to": set its remembered colour a random fraction of the flip
+ * threshold behind (30-100%), along the way its colour is moving, so the drift picks up again
+ * straight away.
  */
 function staggerMemory(c, k, ago) {
   let dr = c.r - ago[k];
@@ -368,7 +376,7 @@ function staggerMemory(c, k, ago) {
     [dr, dg, db] = [rand() - 0.5, rand() - 0.5, rand() - 0.5];
     len = Math.hypot(dr, dg, db) || 1;
   }
-  const back = (rand() * paintThreshold()) / len;
+  const back = ((0.3 + 0.7 * rand()) * paintThreshold()) / len; // (a little nearer due than steady drift: it picks up again sooner)
   c.r -= dr * back;
   c.g -= dg * back;
   c.b -= db * back;
@@ -459,11 +467,14 @@ function cellTarget(w, h) {
 
 /** Lay the board out for the window (if that changed). `face(c)`: what its background switches
  *  first show, if not their colours (see retarget). */
+/** What the board is built for: the window, and the switches' size. */
+const sizeKey = () => `${document.documentElement.clientWidth || window.innerWidth}x${window.innerHeight}@${Math.min(window.devicePixelRatio || 1, S.lite ? 1.5 : 2)}${S.lite ? 'L' : ''}${S.small || ''}`;
+
 function build(first, face = null) {
   const cssW = document.documentElement.clientWidth || window.innerWidth;
   const cssH = window.innerHeight;
   const dpr = Math.min(window.devicePixelRatio || 1, S.lite ? 1.5 : 2);
-  const size = `${cssW}x${cssH}@${dpr}${S.lite ? 'L' : ''}${S.small || ''}`;
+  const size = sizeKey();
   if (size === S.size) return;
   // (Only the switches changed, not the window: the sections' snapshots still hold, but not how
   // they were cut into switches.)
@@ -497,33 +508,6 @@ function build(first, face = null) {
   if (sameWindow) for (const shot of shotCache.values()) shot.then((x) => x?.slices?.clear());
   else shotCache.clear();
   schedulePrefetch();
-}
-
-/**
- * Rebuild the board on other switches, if that changes. `smooth`: the new switches
- * start out showing their piece of the board as it was, bare (no gutters), so nothing visibly
- * changes until a wave turns them over. Returns whether it did that.
- */
-function setSmall(mode, { smooth = false } = {}) {
-  if (mode === S.small) return false;
-  const shot = smooth && board.cells.length ? board.capture() : null;
-  S.small = mode;
-  S.size = '';
-  if (!shot) {
-    build(false);
-    return false;
-  }
-  const src = imageSource(shot);
-  board.hold(); // (the new board is drawn once, already showing the old one's picture)
-  try {
-    build(false, (c) => {
-      c.ca = 0;
-      return slice(src, c.x, c.y, rgbHex(c.r, c.g, c.b));
-    });
-  } finally {
-    board.release();
-  }
-  return true;
 }
 
 /** The section that changes between screens: the visible page card, or the title. */
@@ -884,7 +868,7 @@ function inlinedCss() {
   if (!cssText) {
     cssText = (async () => {
       const xml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-      const css = (await (await fetch('css/style.css?v=57eec90')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
+      const css = (await (await fetch('css/style.css?v=dfdae3a')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
       const faces = new Map();
       for (const [block] of css.matchAll(/@font-face\s*{[^}]*}/g)) {
         const url = block.match(/url\("([^"]+)"\)/)[1];
@@ -1065,7 +1049,7 @@ function schedulePrefetch() {
 }
 let prefetchedFor = '';
 async function prefetchShots() {
-  const busy = () => S.overlay || S.brush || goingTo || brushBoxes.size || S.settling;
+  const busy = () => S.overlay || S.brush || goingTo || brushBoxes.size || S.morph;
   if (busy()) return;
   // (Nothing that goes into the pictures has changed since the last full run: all are cached.)
   const sigNow = () => [S.key, pages[pageIndex(S.key)]?.part, S.dark, S.ascii, S.size, look.palette, look.motion, ...pages.map((p) => comboOf(p.id)), comboOf('intro')].join('|');
@@ -1600,6 +1584,7 @@ function cancelWeb({ keepTheme = false } = {}) {
 }
 
 function go(key, { dir = 1, push = true, origin = null } = {}) {
+  endMorph(); // (an ASCII ripple still running is finished at once)
   if (!key || key === (goingTo ?? S.key) || !board.cells.length) return;
   const from = S.key;
   dropBrush();
@@ -1637,6 +1622,7 @@ const enter = (origin = null) => go('about', { origin });
 
 /** Flip the visible card to its next (+1) or previous (-1) part, in the same wave as a page. */
 function goPart(delta, origin = null) {
+  endMorph();
   if (S.key === 'intro' || goingTo) return;
   const pg = pages[pageIndex(S.key)];
   const to = Math.min(pg.parts.length - 1, Math.max(0, pg.part + delta));
@@ -1705,6 +1691,7 @@ function applyTheme(dark) {
 
 /** Every click counts: a click mid-ripple turns it round from wherever the switches are. */
 function toggleTheme(e) {
+  endMorph();
   const from = e?.currentTarget || liveSwitch();
   S.wantDark = !(S.wantDark ?? S.dark);
   // Copy the bars as they are (usually already cached), before the switch moves: the copy
@@ -1826,7 +1813,7 @@ const switchTheme = safely(async function switchTheme(dark, preShots = null, fro
 function paintStep(now) {
   S.lastStep = now;
   S.frame = paint.frame(scheme());
-  if (S.sweep) return; // (while a sweep crosses the board it moves the background on: sweepStep)
+  if (S.sweep || S.morph) return; // (while a sweep crosses the board it moves the background on: sweepStep)
   for (const c of board.cells) drift(c, paintThreshold() ** 2);
 }
 /** One switch: flip it if its colour has drifted from what it shows by more than the threshold. */
@@ -1857,7 +1844,7 @@ function driftStep(now) {
   }
   const share = Math.ceil((n * Math.min(now - S.lastStep, 100)) / stepMs());
   S.lastStep = now;
-  if (S.sweep) return;
+  if (S.sweep || S.morph) return;
   const th2 = paintThreshold() ** 2;
   for (let k = 0; k < share; k++) {
     if (S.at >= n) {
@@ -1877,7 +1864,7 @@ function driftStep(now) {
 // the new gutter), however little its colour changes.
 
 const SWEEP_BAND = 300; // ms the blend takes to pass a point
-const SWEEP_FREEZE = 480; // ms ahead of the front that drift flips stop starting (> the longest one ahead)
+const SWEEP_FREEZE = 320; // ms ahead of the front that drift flips stop starting (a flip in motion is hurried to land in time)
 
 function startSweep(from, field, lag, gapFrom, fromFrame = null) {
   if (reduce.matches) return;
@@ -1952,11 +1939,10 @@ function sweepStep(now) {
   };
   // An unseen freeze runs SWEEP_FREEZE ms ahead of the front: once it has passed, no drift flip
   // starts (one still waiting is dropped, one in motion is hurried to land in time), so every
-  // switch is free to turn over the moment the front arrives. (Not while the old board's picture
-  // is held until the front.)
+  // switch is free to turn over the moment the front arrives.
   const freezeBy = SWEEP_FREEZE * board.durScale;
   const freeze = (c) => {
-    if (sw.frozen[c.i] || sw.hold) return;
+    if (sw.frozen[c.i]) return;
     sw.frozen[c.i] = 1;
     board.dropQueue(c);
     board.hurry(c, Math.max(60, sw.tau[c.i] + SWEEP_BAND / 2 - el - 30));
@@ -1984,7 +1970,6 @@ function sweepStep(now) {
           turn(c);
           continue;
         }
-        if (sw.hold) continue; // (showing the old board's picture until the front)
         if (sw.tau[i] < el - SWEEP_BAND / 2 + freezeBy) {
           freeze(c);
           continue;
@@ -2003,7 +1988,7 @@ function sweepStep(now) {
         // before the front; behind the front they are the ordinary drift, so handing back to
         // paintStep shows no seam.)
         const ahead = sw.tau[i] + SWEEP_BAND / 2 - el - freezeBy;
-        board.flip(c, paintFace(r, g, b, sw.turned[i] ? S.ascii : !!sw.asciiOld[i]), sw.turned[i] ? { delay: rand() * 500, dur: 440 + rand() * 240 } : { delay: rand() * Math.min(250, ahead), dur: 320 + rand() * 120 });
+        board.flip(c, paintFace(r, g, b, sw.turned[i] ? S.ascii : !!sw.asciiOld[i]), sw.turned[i] ? { delay: rand() * 250, dur: 440 + rand() * 240 } : { delay: rand() * Math.min(250, ahead), dur: 320 + rand() * 120 });
       }
     }
   }
@@ -2110,7 +2095,7 @@ function heldFace(s) {
 
 /** Paint around a point (CSS px): every switch the brush covers flips through brushed faces and back. */
 function splash(x, y, again = false) {
-  if (S.settling) return; // (ASCII mode is about to change: see toggleAscii)
+  if (S.morph) return; // (ASCII mode is changing: see toggleAscii)
   const dpr = board.dpr;
   const cwc = board.cw / dpr;
   const chc = board.ch / dpr;
@@ -2375,10 +2360,10 @@ source.addEventListener(
 let resizeTimer = 0;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => build(false), 120);
+  resizeTimer = setTimeout(() => (endMorph(), build(false)), 120);
 });
 // (The pixel ratio can change with no resize, e.g. on a window moved to another screen.)
-const watchRatio = () => matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`).addEventListener('change', () => (build(false), watchRatio()), { once: true });
+const watchRatio = () => matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`).addEventListener('change', () => (endMorph(), build(false), watchRatio()), { once: true });
 watchRatio();
 
 const keyFromHash = () => {
@@ -2387,43 +2372,232 @@ const keyFromHash = () => {
 };
 window.addEventListener('popstate', () => go(keyFromHash() || 'intro', { push: false }));
 
-/** ASCII mode (the header's >_ button): the board ripples out from the middle into coloured characters (or back). */
+/**
+ * ASCII mode (the header's >_ button): a ripple from the middle of the board turns each switch over
+ * from its colour into a character (or back), as a pulse turns them into new colours: the
+ * background drifts on ahead of the front and picks up again behind it. ASCII mode's switches are
+ * half the size, two by two to a normal one, so the ripple runs on the small switches, each 2×2
+ * group of them standing as one normal switch on the side in colour (see Board.draw). (Without a
+ * GPU, ASCII mode keeps whole switches: the ripple is a plain sweep.)
+ */
 let asciiWait = 0;
 function toggleAscii() {
   // (Once the running transition is done: clicks meanwhile ask for it once, not once each.)
-  if (pendingApply || goingTo || S.overlay || S.sweep || S.settling) return void (asciiWait ||= setTimeout(() => ((asciiWait = 0), toggleAscii()), 250));
+  if (pendingApply || goingTo || S.overlay || S.sweep || S.morph) return void (asciiWait ||= setTimeout(() => ((asciiWait = 0), toggleAscii()), 250));
   const on = !S.ascii;
-  for (const b of $$('.ascii-btn')) b.setAttribute('aria-pressed', String(on)); // (the button answers at once)
-  // The new switches start out showing the board as it was: first every flap in the air lands
-  // (hurried, as ahead of a wave's front) and no new one starts, so none is caught mid-fall.
+  for (const b of $$('.ascii-btn')) b.setAttribute('aria-pressed', String(on));
   dropBrush();
-  const now = performance.now();
-  let left = 0;
-  for (const c of board.active) {
-    board.dropQueue(c);
-    if (!c.anim) continue;
-    board.hurry(c, 150);
-    left = Math.max(left, c.anim.t0 + c.anim.dur - now);
+  restoreBrushBoxes(true);
+  if (S.lite || reduce.matches) {
+    const sweepFrom = scheme();
+    const gapFrom = board.gapColor;
+    const fromFrame = S.frame;
+    S.ascii = on;
+    S.small = on ? 'ascii' : false;
+    if (S.lite) S.size = sizeKey(); // (the same switches)
+    else build(false);
+    retintGutter();
+    if (reduce.matches) return settleBackground();
+    startSweep(sweepFrom, motionField('ripple'), -SWEEP_BAND / 2, gapFrom, fromFrame);
+    S.sweep.asciiOld.fill(on ? 0 : 1); // (ahead of the front, switches keep the old look)
+    return;
   }
-  S.settling = true;
-  setTimeout(() => {
-    S.settling = false;
-    if (pendingApply || goingTo || S.overlay || S.sweep) toggleAscii(); // (a page change came first: after it)
-    else switchAscii(on);
-  }, left + 20);
-}
-function switchAscii(on) {
-  // The ripple turns the new switches over into the new look (and size).
-  const held = setSmall(on ? 'ascii' : false, { smooth: true });
-  const sweepFrom = scheme();
-  const gapFrom = board.gapColor;
-  const fromFrame = S.frame;
+  if (on) {
+    // The small switches, in groups standing for the normal ones exactly as they are (a flap in
+    // the air carries on falling).
+    const old = board.cells.map((c) => ({ cur: c.cur, anim: c.anim, q: c.q, at: c.at, r: c.r, g: c.g, b: c.b, gap: c.gap }));
+    S.small = 'ascii';
+    board.hold();
+    try {
+      build(false, () => blank(board.gapColor));
+      eachGroup((g, lead, members) => {
+        Object.assign(lead, old[g], { big: true });
+        for (const c of members) c.under = c !== lead;
+        if (lead.anim || lead.q.length) board.active.add(lead);
+      });
+    } finally {
+      board.release();
+    }
+  }
   S.ascii = on;
   retintGutter();
-  if (reduce.matches) return settleBackground();
-  startSweep(sweepFrom, motionField('ripple'), -SWEEP_BAND / 2, gapFrom, fromFrame);
-  S.sweep.asciiOld.fill(S.ascii ? 0 : 1); // (ahead of the front, switches keep the old look)
-  S.sweep.hold = held; // (and hold the old board's picture until it arrives)
+  const field = motionField('ripple');
+  const n = board.cells.length / 4;
+  const tau = new Float32Array(n);
+  let last = 0;
+  eachGroup((g, lead) => {
+    const [x, y] = cellCentre(lead.i);
+    tau[g] = field.tau(x + board.cw / board.dpr / 2, y + board.ch / board.dpr / 2) + rand() * 25;
+    last = Math.max(last, tau[g]);
+  });
+  const order = Uint32Array.from({ length: n }, (_, g) => g).sort((p, q) => tau[p] - tau[q]);
+  S.morph = { on, t0: performance.now(), tau, order, front: 0, freeze: 0, turned: new Uint8Array(n), frozen: new Uint8Array(n), joined: new Uint8Array(n), joins: [], last, at: -Infinity };
+}
+
+/** Each 2×2 group of small switches: its number (as a normal switch), its first, its four. */
+function eachGroup(fn) {
+  const cols = board.cols;
+  for (let r = 0, g = 0; r < board.rows; r += 2) {
+    for (let col = 0; col < cols; col += 2, g++) {
+      const i = r * cols + col;
+      const cells = board.cells;
+      fn(g, cells[i], [cells[i], cells[i + 1], cells[i + cols], cells[i + cols + 1]]);
+    }
+  }
+}
+
+/** The ASCII ripple, every frame (see toggleAscii). */
+function morphStep(now, final = false) {
+  const m = S.morph;
+  const el = now - m.t0;
+  const cells = board.cells;
+  const cols = board.cols;
+  const lead = (g) => cells[((g / (cols / 2)) | 0) * 2 * cols + (g % (cols / 2)) * 2];
+  const members = (c) => [c, cells[c.i + 1], cells[c.i + cols], cells[c.i + cols + 1]];
+  // The maps: each small switch's character colour, and each group's colour as a normal switch.
+  const fresh = !m.blocks || (m.field !== paint.field && now - m.at > 200);
+  if (fresh) {
+    m.at = now;
+    m.field = paint.field;
+    S.frame = paint.frame(scheme());
+    m.blocks = paint.frame(scheme(), false, true).rgb;
+  }
+  const small = S.frame.rgb;
+  const blocks = m.blocks;
+  let ago = null;
+  let agoBlocks = null;
+  // The front: a group turns over. Into characters: its four switches show its colour, bare, and
+  // each flips to its character, edges fading in; back: each of the four flips to the group's
+  // colour, edges fading out, and once they have landed the group is one switch again, its
+  // edges fading in.
+  for (; m.front < m.order.length && m.tau[m.order[m.front]] <= el; m.front++) {
+    const g = m.order[m.front];
+    const c0 = lead(g);
+    const four = members(c0);
+    m.turned[g] = 1;
+    if (m.on) {
+      const colour = (c0.anim?.to || c0.cur).bg;
+      for (const c of four) {
+        c.big = c.under = false;
+        c.anim = null;
+        c.q.length = 0;
+        c.cur = solid(colour);
+        c.ca = 0;
+        c.gap = c0.gap;
+        const k = c.i * 3;
+        c.r = small[k];
+        c.g = small[k + 1];
+        c.b = small[k + 2];
+        board.flip(c, paintFace(c.r, c.g, c.b, true), { dur: FLIP_DUR, gap: board.gapColor, edgesIn: 40 });
+        staggerMemory(c, k, (ago ||= recentPast()));
+      }
+    } else {
+      const k = g * 3;
+      const colour = solid(rgbHex(blocks[k], blocks[k + 1], blocks[k + 2]));
+      for (const c of four) board.flip(c, colour, { dur: FLIP_DUR, gap: board.gapColor, edgesOut: 170 });
+      m.joins.push([g, now + FLIP_DUR * board.durScale + 20]);
+    }
+  }
+  // (Turning back: a group whose four have landed becomes one switch.)
+  while (m.joins.length && m.joins[0][1] <= now) {
+    const [g] = m.joins.shift();
+    const c0 = lead(g);
+    const four = members(c0);
+    if (four.some((c) => c.anim)) {
+      m.joins.push([g, now + 50]);
+      continue;
+    }
+    for (const c of four) {
+      c.q.length = 0;
+      c.under = c !== c0;
+    }
+    const k = g * 3;
+    c0.big = true;
+    c0.cur = solid(rgbHex(blocks[k], blocks[k + 1], blocks[k + 2]));
+    c0.r = blocks[k];
+    c0.g = blocks[k + 1];
+    c0.b = blocks[k + 2];
+    staggerMemory(c0, k, (agoBlocks ||= paint.frame(scheme(), true, true).rgb));
+    c0.ca = 0;
+    c0.caAnim = { t0: now, dur: 150, from: null, to: 1 };
+    board.active.add(c0);
+    board.draw(c0, now);
+    m.joined[g] = 1;
+  }
+  // The freeze, a little ahead of the front (as in a sweep): no flip starts, one in motion lands.
+  const freezeBy = SWEEP_FREEZE * board.durScale * Math.SQRT2;
+  for (; m.freeze < m.order.length && m.tau[m.order[m.freeze]] < el + freezeBy; m.freeze++) {
+    const g = m.order[m.freeze];
+    m.frozen[g] = 1;
+    for (const c of m.on ? [lead(g)] : members(lead(g))) {
+      board.dropQueue(c);
+      board.hurry(c, Math.max(60, m.tau[g] - el - 30));
+    }
+  }
+  // The drift, both sides: groups in colour as normal switches, the rest as characters.
+  if (fresh) {
+    const th2 = paintThreshold() ** 2;
+    eachGroup((g, c0, four) => {
+      if ((m.frozen[g] && !m.turned[g]) || (!m.on && m.turned[g] && !m.joined[g])) return;
+      const soon = m.turned[g] ? 250 : 500; // (behind the front the drift picks up quickly)
+      if (!m.on === !!m.turned[g]) { // (a group in colour)
+        if (board.busy(c0)) return;
+        const k = g * 3;
+        if ((blocks[k] - c0.r) ** 2 + (blocks[k + 1] - c0.g) ** 2 + (blocks[k + 2] - c0.b) ** 2 <= th2) return;
+        c0.r = blocks[k];
+        c0.g = blocks[k + 1];
+        c0.b = blocks[k + 2];
+        board.flip(c0, solid(rgbHex(c0.r, c0.g, c0.b)), { delay: rand() * soon, dur: 440 + rand() * 240 });
+        return;
+      }
+      for (const c of four) {
+        if (board.busy(c)) continue;
+        const k = c.i * 3;
+        if ((small[k] - c.r) ** 2 + (small[k + 1] - c.g) ** 2 + (small[k + 2] - c.b) ** 2 <= th2) continue;
+        c.r = small[k];
+        c.g = small[k + 1];
+        c.b = small[k + 2];
+        board.flip(c, paintFace(c.r, c.g, c.b, true), { delay: rand() * soon, dur: 440 + rand() * 240 });
+      }
+    });
+  }
+  if (!final && m.front >= m.order.length && !m.joins.length && el > m.last + 700) endMorph();
+}
+
+/** The ripple done (or cut short): turning ASCII off, the board goes back to normal switches,
+ *  each carrying on exactly as its group was. */
+function endMorph() {
+  const m = S.morph;
+  if (!m) return;
+  if (m.front < m.order.length) {
+    // (Cut short: every group not yet reached turns over at once.)
+    m.t0 = -Infinity;
+    for (const j of m.joins) j[1] = -Infinity;
+    morphStep(performance.now(), true);
+    const now = performance.now();
+    for (const c of board.cells) {
+      if (c.anim || c.q.length) board.set(c, c.q.length ? c.q[c.q.length - 1].f : c.anim.to);
+      board.setEdges(c, 1, now);
+    }
+  }
+  S.morph = null;
+  if (!m.on) {
+    const groups = [];
+    eachGroup((g, c0) => groups.push({ cur: c0.cur, anim: c0.anim, q: c0.q, at: c0.at, r: c0.r, g: c0.g, b: c0.b, gap: c0.gap, ca: c0.ca }));
+    S.small = false;
+    board.hold();
+    try {
+      build(false, () => blank(board.gapColor));
+      for (const c of board.cells) {
+        Object.assign(c, groups[c.i]);
+        if (c.anim || c.q.length) board.active.add(c);
+      }
+    } finally {
+      board.release();
+    }
+  }
+  board.settleGaps();
+  paintStep(performance.now());
 }
 
 /** Without motion: the background takes its new colours and gutters at once. */
@@ -2436,13 +2610,14 @@ function settleBackground() {
 
 /** The board ripples from `origin` into the page's next colour combo. */
 function pulseCombo(origin) {
-  if (pendingApply || goingTo || S.overlay || S.sweep) return; // (not over a transition still running)
+  if (pendingApply || goingTo || S.overlay || S.sweep || S.morph) return; // (not over a transition still running)
   const n = combosOf(S.key, look).length || 1;
   recolour(() => setCombo(S.key, (comboOf(S.key) + 1) % n), motionField('ripple', 1, origin));
 }
 
 /** The palette picked in the review panel: the board sweeps into it. */
 function pickPalette(value) {
+  endMorph();
   cancelWeb();
   recolour(() => {
     look.palette = value;
@@ -2472,9 +2647,9 @@ function loop(now) {
   if (S.lastNow) S.pt += (Math.min(now - S.lastNow, 250) / 1000) * SPEED;
   S.lastNow = now;
   paint.tick(now, S.pt, S.lite ? (S.sweep ? 600 : stepMs()) : 100);
-  if (!reduce.matches && !S.settling) driftStep(now);
-  else S.lastStep = now;
+  if (!reduce.matches) driftStep(now);
   if (S.sweep) sweepStep(now);
+  if (S.morph) morphStep(now);
   watchFrames(now);
   const b = S.brush;
   if (b && b.painting && b.last >= 0 && now - b.lastSplash >= RESPLASH_MS) {

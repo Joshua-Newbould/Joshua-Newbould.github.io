@@ -8,7 +8,7 @@
 // no JavaScript between starting and landing.
 // Anything that goes wrong here falls back to drawing nothing new, never to throwing: main.js
 // swaps in the 2D board if the GPU is lost for good (see onfail).
-import { Board } from './board.js?v=57eec90';
+import { Board } from './board.js?v=dfdae3a';
 
 const STRIDE = 28; // int32s per switch (see encode)
 const SOURCES = 12; // pictures (sections' snapshots, the old board) bound at once: units 3…14
@@ -25,10 +25,11 @@ flat out ivec4 vC0; flat out vec4 vC1; flat out ivec4 vC2; flat out ivec4 vF0; f
 void main() {
   // Only the switches that changed this frame (stamped with it) and those turning are drawn: the
   // rest keep their pixels in the frame. (A switch skipped is a quad of nothing, off screen.)
-  if (aC2.z != uFrame && !((aC0.w & 1) != 0 && uNow <= aC1.x + aC1.y + 50.0)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  // A switch under its 2×2 group's first is never drawn; that one is drawn twice the size.
+  if ((aC0.w & 8) != 0 || (aC2.z != uFrame && !((aC0.w & 1) != 0 && uNow <= aC1.x + aC1.y + 50.0))) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   // (One quad per switch, from the vertex number: no vertex buffer.)
   vec2 corner = vec2(float(gl_VertexID & 1), float(gl_VertexID >> 1));
-  vec2 p = vec2(aC0.xy) + corner * uCell;
+  vec2 p = vec2(aC0.xy) + corner * uCell * ((aC0.w & 4) != 0 ? 2.0 : 1.0);
   gl_Position = vec4(p.x / uSize.x * 2.0 - 1.0, 1.0 - p.y / uSize.y * 2.0, 0.0, 1.0);
   vC0 = aC0; vC1 = aC1; vC2 = aC2; vF0 = aF0; vF1 = aF1; vT0 = aT0; vT1 = aT1;
 }`;
@@ -36,9 +37,11 @@ void main() {
 const FS = `#version 300 es
 precision highp float; precision highp int; precision highp sampler2DArray;
 flat in ivec4 vC0; flat in vec4 vC1; flat in ivec4 vC2; flat in ivec4 vF0; flat in ivec4 vF1; flat in ivec4 vT0; flat in ivec4 vT1;
-uniform vec2 uSize; uniform float uNow; uniform bool uFine, uLines;
-uniform float uCw, uCh, uFw, uFh, uHy;
-uniform sampler2D uChrome, uTurn; uniform sampler2DArray uAtlas;
+uniform vec2 uSize; uniform float uNow;
+// A switch's geometry: [0] a switch of this board, [1] a 2×2 group of them drawn as one.
+uniform vec4 uGeom[2]; uniform float uHyG[2]; uniform bool uFineG[2], uLinesG[2];
+float uCw, uCh, uFw, uFh, uHy; bool uFine, uLines, BIG; // (this switch's, set in main)
+uniform sampler2D uChrome, uChromeBig, uTurn; uniform sampler2DArray uAtlas;
 uniform sampler2D uS0, uS1, uS2, uS3, uS4, uS5, uS6, uS7, uS8, uS9, uS10, uS11; uniform vec2 uSrcSize[${SOURCES}];
 out vec4 oColor;
 
@@ -153,7 +156,7 @@ void brushGutters(Face f) {
 // white: its colour is where the gutter goes, its alpha the gutter and the hinge seam.)
 void chrome(vec3 gap, float ca) {
   if (ca <= 0.0) return;
-  vec4 m = texelFetch(uChrome, ivec2(int(X), int(Y)), 0);
+  vec4 m = BIG ? texelFetch(uChromeBig, ivec2(int(X), int(Y)), 0) : texelFetch(uChrome, ivec2(int(X), int(Y)), 0);
   over(vec4(q(gap * m.r), m.a), ca);
 }
 // Board.tilePart for the one little flap this pixel is in.
@@ -169,6 +172,8 @@ void main() {
   vec2 fc = vec2(gl_FragCoord.x, uSize.y - gl_FragCoord.y);
   X = floor(fc.x) - float(vC0.x); Y = floor(fc.y) - float(vC0.y);
   vec3 gap = rgb(vC0.z); int flags = vC0.w;
+  int g = (flags & 4) != 0 ? 1 : 0;
+  BIG = g == 1; uCw = uGeom[g].x; uCh = uGeom[g].y; uFw = uGeom[g].z; uFh = uGeom[g].w; uHy = uHyG[g]; uFine = uFineG[g]; uLines = uLinesG[g];
   bool anim = (flags & 1) != 0, tiled = (flags & 2) != 0;
   float t0 = vC1.x, dur = vC1.y, ca = vC1.z, shK = vC1.w;
   vec3 shade = rgb(vC2.x);
@@ -179,7 +184,9 @@ void main() {
   float theta = PI * turn(p);
   float k = shK * 1.15;
   if (anim && tiled) {
-    // Board.drawTiles: only the brushed pieces fall.
+    // Board.drawTiles: only the brushed pieces fall, shaded in their gutters' black.
+    vec3 tshade = to.mos ? to.bgap : from.bgap;
+    float tk = 1.15;
     under(to, false);
     int mnx = to.mos ? to.nx : from.nx, mny = to.mos ? to.ny : from.ny;
     if (X < uFw && Y < uFh) {
@@ -196,13 +203,13 @@ void main() {
           if (theta < PI / 2.0) {
             float sc = cos(theta), h = thy * sc;
             tilePart(from, t, ty, 0.0, thy, ty + thy - h, h);
-            fill(shade, k * 0.5 * (1.0 - sc) * cov(ty + thy - h, ty + thy));
-            fill(shade, k * 0.3 * sc * cov(ty, ty + thy - h));
+            fill(tshade, tk * 0.5 * (1.0 - sc) * cov(ty + thy - h, ty + thy));
+            fill(tshade, tk * 0.3 * sc * cov(ty, ty + thy - h));
           } else {
             float sc = -cos(theta), h = tbh * sc;
-            fill(shade, k * 0.28 * (1.0 - sc) * cov(ty + thy, ty + th));
+            fill(tshade, tk * 0.28 * (1.0 - sc) * cov(ty + thy, ty + th));
             tilePart(to, t, ty, thy, tbh, ty + thy, h);
-            fill(shade, k * 0.4 * (1.0 - sc) * cov(ty + thy, ty + thy + h));
+            fill(tshade, tk * 0.4 * (1.0 - sc) * cov(ty + thy, ty + thy + h));
           }
         }
       }
@@ -303,16 +310,12 @@ export class GLBoard extends Board {
     this.all = true; // or all of them
     this.later = new Set(); // switches waiting for a picture (see glyph budget)
     this.srcs = new Map(); // picture (canvas) -> { slot, tex }
-    this.captures = new Set(); // copies of the board, on the GPU only (see capture)
     this.onfail = null; // called if the GPU is lost for good: the 2D board takes over
     this.tints = true; // (characters are drawn white and take their colour here: see glyphKey)
     this.initGL();
     canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault(); // (so the browser may give it back)
       this.lost = true;
-      // A board copy lived only on the GPU: its slices now show their own colour (see encodeFace).
-      for (const c of this.captures) c.lost = true;
-      this.captures.clear();
       // (Not given back in 3 s, it is taken as gone; a hidden tab may be given it back later.)
       const wait = () => (this.lostTimer = setTimeout(() => this.lost && (document.hidden ? wait() : this.giveUp()), 3000));
       clearTimeout(this.lostTimer);
@@ -326,7 +329,7 @@ export class GLBoard extends Board {
         // (The pictures were only on the GPU: they are drawn again as they are needed.)
         this.glyphCache.clear();
         this.atlases = [];
-        this.atlas = null;
+        this.sheets = new Map();
         if (this.cells.length) this.setup();
         this.lost = false;
       } catch (err) {
@@ -359,6 +362,7 @@ export class GLBoard extends Board {
       this.u[name] = gl.getUniformLocation(pr, name);
     }
     gl.uniform1i(this.u.uChrome, 0);
+    gl.uniform1i(this.u.uChromeBig, 15);
     gl.uniform1i(this.u.uAtlas, 1);
     gl.uniform1i(this.u.uTurn, 2);
     for (let i = 0; i < SOURCES; i++) gl.uniform1i(this.u['uS' + i], 3 + i);
@@ -380,6 +384,7 @@ export class GLBoard extends Board {
     this.fbo = gl.createFramebuffer();
     this.frameTex = null;
     this.chromeTex = gl.createTexture();
+    this.chromeBigTex = gl.createTexture();
     this.turnTex = gl.createTexture();
     this.turnSent = false;
     this.atlasTex = null;
@@ -449,6 +454,10 @@ export class GLBoard extends Board {
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, this.chrome('#fff'));
     this.smooth(gl.TEXTURE_2D, gl.NEAREST);
+    gl.activeTexture(gl.TEXTURE15);
+    gl.bindTexture(gl.TEXTURE_2D, this.chromeBigTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, this.chrome('#fff', this.gmBig));
+    this.smooth(gl.TEXTURE_2D, gl.NEAREST);
     this.atlasNew.length = 0;
     this.atlasClean = 0; // (pages whose GPU copy is whole but for atlasNew: a new grid starts new pages)
     this.all = true;
@@ -489,7 +498,7 @@ export class GLBoard extends Board {
   /** A new picture goes straight to the GPU's copy of its atlas page. (The page's canvas is left
    *  blank: drawing on it costs, and nothing here reads it.) */
   place(pic, g) {
-    g.layer = this.atlases.length - 1;
+    g.layer = this.atlases.indexOf(g.c);
     this.atlasNew.push([g.layer, g.x, g.y, pic]);
   }
   /** A face's picture, if it has been drawn or there is still time to draw it this frame (new
@@ -504,7 +513,6 @@ export class GLBoard extends Board {
   slot(canvas) {
     const e = this.srcs.get(canvas);
     if (e) return e.slot;
-    if (canvas.lost) return -1;
     let slot = this.slots.indexOf(null);
     if (slot < 0 && !this.swept) {
       this.sweep();
@@ -513,16 +521,15 @@ export class GLBoard extends Board {
     if (slot < 0) return -1;
     const gl = this.gl;
     gl.activeTexture(gl.TEXTURE3 + slot);
-    const tex = canvas.tex || this.texture(canvas);
+    const tex = this.texture(canvas);
     this.srcs.set(canvas, { slot, tex });
     this.slots[slot] = canvas;
     this.srcSize[slot * 2] = canvas.width;
     this.srcSize[slot * 2 + 1] = canvas.height;
     return slot;
   }
-  /** Free the pictures no switch shows or is going to (or only the board copies, which never come
-   *  back, if not `pictures`). */
-  sweep(pictures = true) {
+  /** Free the pictures no switch shows or is going to. */
+  sweep() {
     this.swept = true;
     const used = new Set();
     const see = (f) => {
@@ -538,17 +545,10 @@ export class GLBoard extends Board {
       for (const n of c.q) see(n.f);
     }
     for (const [canvas, e] of this.srcs) {
-      if (used.has(canvas) || (!pictures && !canvas.tex)) continue;
+      if (used.has(canvas)) continue;
       this.gl.deleteTexture(e.tex);
       this.srcs.delete(canvas);
       this.slots[e.slot] = null;
-    }
-    // (A board copy whose slices went before a frame showed one never had a slot.)
-    for (const c of this.captures) {
-      if (used.has(c)) continue;
-      if (!this.srcs.has(c)) this.gl.deleteTexture(c.tex);
-      this.captures.delete(c);
-      c.lost = true;
     }
   }
 
@@ -569,7 +569,7 @@ export class GLBoard extends Board {
     } else if (u && u.t === 'slice') {
       const slot = this.slot(u.src.canvas);
       if (slot >= 0) [uk, ul, ux, uy] = [2, slot, u.sx, u.sy];
-      else ok = u.src.canvas.lost; // (a lost board copy: its colour for good; else try again)
+      else ok = false; // (try again next frame)
     }
     let mosaic = false;
     let ml = 0;
@@ -609,7 +609,7 @@ export class GLBoard extends Board {
     I[o] = s.x;
     I[o + 1] = s.y;
     I[o + 2] = packColour(gap);
-    I[o + 3] = (a ? 1 : 0) | (a && this.tiled(a) ? 2 : 0);
+    I[o + 3] = (a ? 1 : 0) | (a && this.tiled(a) ? 2 : 0) | (s.big ? 4 : 0) | (s.under ? 8 : 0);
     F[o + 4] = a ? a.t0 - this.t0base : 0;
     F[o + 5] = a ? a.dur : 1;
     F[o + 6] = s.ca ?? 1;
@@ -630,7 +630,7 @@ export class GLBoard extends Board {
     if (now - (this.sweptAt || 0) > 4000) {
       // (Now and then, let go of pictures no longer shown.)
       this.sweptAt = now;
-      if (this.srcs.size > 2 || this.captures.size) this.sweep(this.srcs.size > 2);
+      if (this.srcs.size > 2) this.sweep();
     }
     if (this.gapColor !== this.gapWas || this.restyle) {
       // A new gutter colour or shading: switches in motion take it at once, as on the 2D board
@@ -696,13 +696,11 @@ export class GLBoard extends Board {
     gl.uniform2f(u.uCell, this.cw, this.ch);
     gl.uniform1f(u.uNow, now - this.t0base);
     gl.uniform1i(u.uFrame, stamp);
-    gl.uniform1i(u.uFine, this.fine ? 1 : 0);
-    gl.uniform1i(u.uLines, this.lines ? 1 : 0);
-    gl.uniform1f(u.uCw, this.cw);
-    gl.uniform1f(u.uCh, this.ch);
-    gl.uniform1f(u.uFw, this.gm.fw);
-    gl.uniform1f(u.uFh, this.gm.fh);
-    gl.uniform1f(u.uHy, this.gm.hy);
+    const fineBig = this.cells.length / 4 > 4000;
+    gl.uniform4fv(u.uGeom, [this.cw, this.ch, this.gm.fw, this.gm.fh, this.cw * 2, this.ch * 2, this.gmBig.fw, this.gmBig.fh]);
+    gl.uniform1fv(u.uHyG, [this.gm.hy, this.gmBig.hy]);
+    gl.uniform1iv(u.uFineG, [this.fine ? 1 : 0, fineBig ? 1 : 0]);
+    gl.uniform1iv(u.uLinesG, [this.lines ? 1 : 0, this.cw * 2 >= 12 && !fineBig ? 1 : 0]);
     gl.uniform2fv(u.uSrcSize, this.srcSize);
     for (let i = 0; i < SOURCES; i++) {
       gl.activeTexture(gl.TEXTURE3 + i);
@@ -710,6 +708,8 @@ export class GLBoard extends Board {
     }
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.chromeTex);
+    gl.activeTexture(gl.TEXTURE15);
+    gl.bindTexture(gl.TEXTURE_2D, this.chromeBigTex);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex || this.emptyPages);
     gl.activeTexture(gl.TEXTURE2);
@@ -774,36 +774,6 @@ export class GLBoard extends Board {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, TURN, 1, 0, gl.RED, gl.FLOAT, v);
     this.smooth(gl.TEXTURE_2D, gl.NEAREST);
     this.turnSent = true;
-  }
-
-  /** A copy of the board as it is on screen, kept on the GPU: a picture to cut slices from (it
-   *  has the size of a canvas, and stands in for one). Null if it can't be had. */
-  capture() {
-    if (this.lost || this.gl.isContextLost() || !this.cells.length) return null; // (lost, if not yet told)
-    try {
-      const gl = this.gl;
-      const { W, H } = this;
-      this.frame(performance.now()); // (anything changed since the last frame, drawn)
-      const tex = gl.createTexture();
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, W, H);
-      this.smooth(gl.TEXTURE_2D, gl.LINEAR);
-      const fb = gl.createFramebuffer();
-      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fb);
-      gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fbo);
-      // (Upside down: the frame's rows count up, a picture's down.)
-      gl.blitFramebuffer(0, 0, W, H, 0, H, W, 0, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.deleteFramebuffer(fb);
-      const shot = { width: W, height: H, tex };
-      this.captures.add(shot);
-      return shot;
-    } catch (err) {
-      console.warn('GL board:', err);
-      return null;
-    }
   }
 
   /** Something failed: draw nothing new this frame (and everything afresh next time). Failing

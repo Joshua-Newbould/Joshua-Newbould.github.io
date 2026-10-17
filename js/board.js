@@ -101,7 +101,7 @@ export class Board {
   /** A board of very many small switches: on it the fine touches of a flip (the hinge and edge
    *  lines, the cast shadow and the gleam) can't be seen, and cost the most. */
   get fine() {
-    return this.cells.length > 4000;
+    return this.cells.length / (this.asBig ? 4 : 1) > 4000;
   }
   /** Whether a flip draws its hinge and edge lines (invisible on tiny flaps). */
   get lines() {
@@ -140,11 +140,12 @@ export class Board {
     this.canvas.style.width = cssW + 'px';
     this.canvas.style.height = cssH + 'px';
     this.glyphCache.clear();
-    this.atlas = null;
+    this.sheets = new Map();
     this.atlases = [];
     this.chromes.clear();
     this.active.clear();
     this.gm = this.geom(cw, ch);
+    this.gmBig = this.geom(cw * 2, ch * 2); // (a switch standing for a 2×2 group: see draw)
     const n = cols * rows;
     this.cells = new Array(n);
     for (let i = 0; i < n; i++) {
@@ -168,9 +169,9 @@ export class Board {
 
   /** Static overlay giving a flap its physical shape: gutter, rounded corners and a faint hinge seam.
    *  Faces stay one flat colour. */
-  chrome(gapColor) {
-    const { w, h, fw, fh, hy } = this.gm;
-    const id = gapColor;
+  chrome(gapColor, gm = this.gm) {
+    const { w, h, fw, fh, hy } = gm;
+    const id = gapColor + w;
     let c = this.chromes.get(id);
     if (c) return c;
     const { gap, dpr } = this;
@@ -220,22 +221,23 @@ export class Board {
     const sw = fw + 2; // (a pixel round each, so a scaled half never picks up its neighbour)
     const sh = fh + 2;
     const cols = Math.max(1, Math.floor(A / sw));
-    if (!this.atlas || this.atlasN >= cols * Math.max(1, Math.floor(A / sh))) {
+    // (Each size of picture has its own sheet being filled.)
+    let sheet = this.sheets.get(fw);
+    if (!sheet || sheet.n >= cols * Math.max(1, Math.floor(A / sh))) {
       if (this.atlases.length >= 6) {
         // (The brush makes many pictures: now and then start afresh.)
         this.glyphCache.clear();
         this.atlases = [];
+        this.sheets.clear();
       }
-      this.atlas = document.createElement('canvas');
-      this.atlas.width = A;
-      this.atlas.height = A;
-      this.atlases.push(this.atlas);
-      this.atlasN = 0;
+      sheet = { c: Object.assign(document.createElement('canvas'), { width: A, height: A }), n: 0 };
+      this.atlases.push(sheet.c);
+      this.sheets.set(fw, sheet);
     }
-    const x = (this.atlasN % cols) * sw + 1;
-    const y = Math.floor(this.atlasN / cols) * sh + 1;
-    this.atlasN++;
-    g = { c: this.atlas, x, y };
+    const x = (sheet.n % cols) * sw + 1;
+    const y = Math.floor(sheet.n / cols) * sh + 1;
+    sheet.n++;
+    g = { c: sheet.c, x, y };
     this.place(this.glyphCanvas(f, gm), g);
     this.glyphCache.set(gk, g);
     return g;
@@ -370,9 +372,10 @@ export class Board {
     if (u.t === 'slice' && w && h) ctx.drawImage(u.src.canvas, u.sx, u.sy, w, h, x, y, w, h);
     const p = Math.min(1, Math.max(0, (now - a.t0) / a.dur));
     const theta = Math.PI * this.turn(p);
-    const sh = this.shades.get(s.gap || this.gapColor) || { shade: this.shade, k: this.shadeK };
-    const k = sh.k * 1.15;
     const m = a.to.t === 'mosaic' ? a.to : a.from;
+    // (The little flaps are shaded in their own gutters' black, as the brush's characters are.)
+    const sh = { shade: m.gap };
+    const k = 1.15;
     for (let j = 0; j < m.ny; j++) {
       for (let i = 0; i < m.nx; i++) {
         const t = j * m.nx + i;
@@ -453,6 +456,26 @@ export class Board {
       this.dirty.add(s);
       return;
     }
+    // On a board of small switches, a 2×2 group of them may stand for one normal switch (ASCII
+    // mode turning on or off): its first (`big`) is drawn as that switch, over the others (`under`).
+    if (s.under) return;
+    if (s.big) {
+      const keep = [this.cw, this.ch, this.gm];
+      this.cw *= 2;
+      this.ch *= 2;
+      this.gm = this.gmBig;
+      this.asBig = true;
+      try {
+        return this.drawCell(s, now);
+      } finally {
+        [this.cw, this.ch, this.gm] = keep;
+        this.asBig = false;
+      }
+    }
+    this.drawCell(s, now);
+  }
+
+  drawCell(s, now) {
     const gm = this.gm;
     const { fh, fw, hy } = gm;
     const { x, y } = s;
@@ -653,7 +676,7 @@ export class Board {
     s.eOut = edgesOut;
     s.eFrom = s.ca ?? 1;
     if (edgesIn) s.caAnim = null;
-    const k = this.durScale;
+    const k = this.durScale * (s.big ? Math.SQRT2 : 1); // (a group falls at a normal switch's pace)
     if (steps) for (const st of steps) s.q.push(st.t ? { f: st, d: stepDur * k, w: 0 } : { f: st.f, d: stepDur * k, w: st.w || 0 });
     // `gap`: the gutter around this flap changes colour as the flip starts (theme waves).
     s.q.push({ f, d: dur * k, w: 0, then, gap: gap || pending });
@@ -685,15 +708,6 @@ export class Board {
 
   /** Put the frame on screen. Here nothing to do: a switch is drawn as soon as it changes. */
   render(now) {}
-
-  /** A copy of the board as it is on screen, as a picture to cut slices from. */
-  capture() {
-    const c = document.createElement('canvas');
-    c.width = this.canvas.width;
-    c.height = this.canvas.height;
-    c.getContext('2d').drawImage(this.canvas, 0, 0);
-    return c;
-  }
 
   /** Drop the flips still waiting (one in motion carries on). */
   dropQueue(s) {
