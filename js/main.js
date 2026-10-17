@@ -293,9 +293,15 @@ const mixLab = (a, b, t) => {
  * A blend that goes round the colour wheel (keeping colourfulness), the way that doesn't pass
  * through olive; near-neutral colours (card surfaces, the silver title) blend in OKLab.
  */
+const lchs = new Map(); // (a wave blends the same colours many times over)
 const hexToLch = (h) => {
+  let v = lchs.get(h);
+  if (v) return v;
   const [L, A, B] = hexToLab(h);
-  return [L, Math.hypot(A, B), ((Math.atan2(B, A) * 180) / Math.PI + 360) % 360];
+  v = [L, Math.hypot(A, B), ((Math.atan2(B, A) * 180) / Math.PI + 360) % 360];
+  if (lchs.size > 8192) lchs.clear();
+  lchs.set(h, v);
+  return v;
 };
 const inOlive = (h) => ((h = (h + 360) % 360), h > 65 && h < 150);
 const mixLch = (a, b, t) => {
@@ -411,6 +417,43 @@ function retarget(indices, how, force = null) {
     if (opts) board.flip(c, f, opts);
     else board.set(c, f);
   }
+}
+
+/**
+ * retarget() for a wave crossing the board along `field`: `how(i, face, delay)` gives the flip for
+ * a switch the wave reaches after `delay` ms. The switches it reaches first are set up at once and
+ * the rest a few milliseconds' worth a frame, each well before its turn (a whole board in one go
+ * is a long frame on a phone). Returns the last delay.
+ */
+function retargetWave(field, ahead, how, force) {
+  const token = morphToken;
+  const t0 = performance.now();
+  // (In order of arrival, roughly: by 40 ms slices of the wave.)
+  const slices = [];
+  let last = 0;
+  for (let i = 0; i < board.cells.length; i++) {
+    const d = ahead + field.tau(...cellCentre(i)) + rand() * 25;
+    last = Math.max(last, d);
+    (slices[(d / 40) | 0] ||= []).push(i, d);
+  }
+  const delays = new Map();
+  const step = (k) => {
+    const until = performance.now() + 3;
+    const late = performance.now() - t0;
+    for (; k < slices.length && (performance.now() < until || reduce.matches); k++) {
+      const sl = slices[k];
+      if (!sl) continue;
+      const idx = [];
+      for (let n = 0; n < sl.length; n += 2) {
+        idx.push(sl[n]);
+        delays.set(sl[n], Math.max(0, sl[n + 1] - late));
+      }
+      retarget(idx, (i, to) => how(i, to, delays.get(i)), force);
+    }
+    if (k < slices.length) requestAnimationFrame(() => token === morphToken && step(k));
+  };
+  step(0);
+  return last;
 }
 
 function* allCells() {
@@ -550,9 +593,20 @@ function layoutWeb() {
   if (!S.overlay) placeShadow(morphBox()); // outside a transition the shadow follows the card
 }
 
-/** Give a bar the first of `modes` (sets of classes) under which nothing in it overflows `width`. */
-function fitBar(el, width, modes) {
+/** Give a bar a set of classes from `modes`: the one numbered `pick`, or else the first under
+ *  which nothing in it overflows `width`. Returns which it took. */
+function fitBar(el, width, modes, pick = -1) {
   const all = [...new Set(modes.flat())];
+  const use = (m) => {
+    el.classList.remove(...all);
+    el.classList.add(...m);
+    // 'abbr': links with a short form (data-short) use it.
+    for (const a of el.querySelectorAll('[data-short]')) {
+      a.dataset.full ||= a.textContent;
+      a.textContent = m.includes('abbr') ? a.dataset.short : a.dataset.full;
+    }
+  };
+  if (pick >= 0) return use(modes[pick]), pick;
   const [hid, sh] = [el.hidden, siteEl.hidden];
   el.hidden = false;
   siteEl.hidden = false;
@@ -562,19 +616,24 @@ function fitBar(el, width, modes) {
     const lim = el.getBoundingClientRect().right - parseFloat(getComputedStyle(el).paddingRight) + 6; // (buttons' tap areas reach 4px past their text)
     return [el, ...el.children].every((x) => x.scrollWidth <= x.clientWidth + 5) && [...el.querySelectorAll('button, p, a')].every((x) => x.getBoundingClientRect().right <= lim);
   };
-  for (const m of modes) {
-    el.classList.remove(...all);
-    el.classList.add(...m);
-    // 'abbr': links with a short form (data-short) use it.
-    for (const a of el.querySelectorAll('[data-short]')) {
-      a.dataset.full ||= a.textContent;
-      a.textContent = m.includes('abbr') ? a.dataset.short : a.dataset.full;
-    }
+  let k = 0;
+  for (; k < modes.length; k++) {
+    use(modes[k]);
     if (fits()) break;
   }
   el.hidden = hid;
   siteEl.hidden = sh;
+  return Math.min(k, modes.length - 1);
 }
+
+// What laying out the bars and the title measured, by window and contents: measuring makes the
+// browser lay the page out again and again, and the answers only change with the window.
+const measured = new Map();
+document.fonts?.addEventListener('loadingdone', () => {
+  measured.clear();
+  for (const p of pages) p.fitKey = null;
+  if (board.cells.length) layoutWeb();
+});
 
 function layoutWebBoxes() {
   if (!board.cells.length) return;
@@ -625,11 +684,13 @@ function layoutWebBoxes() {
   };
 
   const bw = all;
+  const mkey = [G.cssW, G.cssH, G.dpr, G.cw, G.ch, document.documentElement.dataset.vp, look.motion].join('|'); // (the footer's page names never change its size: see .foot-nav button)
+  const m = measured.get(mkey) || {};
   // Header and footer: the roomiest layout that fits on one line each (short screens keep
   // the nav on the header's row as long as they can, since height is what they lack).
   const short = G.cssH <= 560 && G.cssW > G.cssH;
-  fitBar(headerEl(), bw * cw - gap, short ? [[], ['compact'], ['compact', 'tight'], ['compact', 'tight', 'abbr'], ['stack', 'tight', 'abbr']] : [[], ['compact'], ['stack'], ['stack', 'tight'], ['stack', 'tight', 'abbr']]);
-  fitBar(footerEl(), bw * cw - gap, [[], ['compact'], ['nocopy'], ['nocopy', 'compact'], ['nocopy', 'compact', 'notool'], ['nocopy', 'compact', 'notool', 'arrows']]);
+  m.hd = fitBar(headerEl(), bw * cw - gap, short ? [[], ['compact'], ['compact', 'tight'], ['compact', 'tight', 'abbr'], ['stack', 'tight', 'abbr']] : [[], ['compact'], ['stack'], ['stack', 'tight'], ['stack', 'tight', 'abbr']], m.hd ?? -1);
+  m.ft = fitBar(footerEl(), bw * cw - gap, [[], ['compact'], ['nocopy'], ['nocopy', 'compact'], ['nocopy', 'compact', 'notool'], ['nocopy', 'compact', 'notool', 'arrows']], m.ft ?? -1);
   {
     // Header and footer share one inset.
     const hd = headerEl();
@@ -654,10 +715,14 @@ function layoutWebBoxes() {
     siteEl.hidden = sh;
     return px;
   };
-  headerEl().style.setProperty('--cut', '0px');
-  footerEl().style.paddingBottom = '';
-  const needH = Math.max(barMin, contentOf(headerEl()));
-  const needF = Math.max(barMin, contentOf(footerEl()));
+  if (m.needH == null) {
+    headerEl().style.setProperty('--cut', '0px');
+    footerEl().style.paddingBottom = '';
+    m.needH = contentOf(headerEl());
+    m.needF = contentOf(footerEl());
+  }
+  const needH = Math.max(barMin, m.needH);
+  const needF = Math.max(barMin, m.needF);
   const seenTop = cutTop ? ch - cutTop : 0;
   const hh = (cutTop ? 1 : 0) + Math.max(0, Math.ceil((needH - seenTop + gap) / ch));
   const fh = Math.max(0, Math.ceil((needF - seenBottom + gap) / ch));
@@ -699,12 +764,16 @@ function layoutWebBoxes() {
   // The title window sits where the cards sit (same top, same width) and is as tall as the
   // tallest, so entering the site turns one window into the next in place.
   {
-    const hid = introEl.hidden;
-    introEl.hidden = false;
-    const h = Math.min(room, Math.max(measure(introEl, span) + 2, tallest));
-    introEl.hidden = hid;
+    if (m.intro == null) {
+      const hid = introEl.hidden;
+      introEl.hidden = false;
+      m.intro = measure(introEl, span);
+      introEl.hidden = hid;
+    }
+    const h = Math.min(room, Math.max(m.intro + 2, tallest));
     place(introEl, c0, top + Math.max(0, Math.min(topOff, room - h)), span, h);
   }
+  measured.set(mkey, m);
 }
 
 /**
@@ -970,8 +1039,9 @@ const cardBg = (el) => {
 };
 
 /**
- * While the site is idle, render every box a transition could need (each page's card, the
- * header and footer as they look on each page, the title), so transitions start at once.
+ * While the site is idle, render every box a transition could need (each page's card and its
+ * parts, the card in the other theme, the title, the bars as they first appear), so transitions
+ * start at once.
  */
 let prefetchTimer = 0;
 function schedulePrefetch() {
@@ -1063,7 +1133,8 @@ async function prefetchShots() {
     }
   });
   for (const pg of pages) jobs.push(() => (pg.el.hidden ? inColours(pg.id, () => withShown(pg.el, () => snapshot(pg.el))) : null));
-  for (const pg of pages) jobs.push(() => [asOn(pg.id, headerEl()), asOn(pg.id, footerEl())]);
+  // The bars only turn into switches on the way in from the title (to About, mostly).
+  if (S.key === 'intro') jobs.push(() => [asOn('about', headerEl()), asOn('about', footerEl())]);
   jobs.push(() => (introEl.hidden ? inColours('intro', () => withShown(introEl, () => snapshot(introEl))) : null));
   // One job per idle moment: a job whose pictures are all cached finishes without ever waiting,
   // and a run of them in one go is a long task just as a wave settles (or a click arrives).
@@ -1416,11 +1487,10 @@ const webGo = safely(async function webGo(go, { dir = 1, toKey = null, fromNothi
   const ahead = PAGE_AHEAD; // edges fade in over this long, reaching full strength as the switch flips
   const STEP = FLIP_STEP;
   const DUR = FLIP_DUR;
-  let span = 0;
-  retarget(
-    allCells(),
-    (i, to) => {
-      const delay = ahead + field.tau(...cellCentre(i)) + rand() * 25;
+  const span = retargetWave(
+    field,
+    ahead,
+    (i, to, delay) => {
       // One soft step between what the switch shows now and where it is going, blended in OKLab
       // and leaning towards the new colours (so a card's switches stay close to the card's
       // colours, and the board's pass through colours that belong to the new page).
@@ -1428,7 +1498,6 @@ const webGo = safely(async function webGo(go, { dir = 1, toKey = null, fromNothi
       const a = faceColour(from);
       const b = faceColour(to);
       const steps = a && b && a !== b ? [solid(mixLch(a, b, 0.62))] : null;
-      span = Math.max(span, delay);
       return { delay, dur: DUR, steps, stepDur: STEP, gap: board.gapColor, edgesIn: ahead, edgesOut: S.overlay.has(i) ? 170 : 0 };
     },
     (i) => S.overlay.has(i) || before.has(i),
@@ -1654,8 +1723,7 @@ const switchTheme = safely(async function switchTheme(dark, preShots = null, fro
   startSweep(sweepFrom, motionField('ripple', 1, origin), THEME_AHEAD - SWEEP_BAND / 2, gapFrom, fromFrame); // the background ripples into the new theme
   syncDom();
 
-  const BLENDS = [0.5];
-  const between = new Map(); // cell -> one blended face per BLENDS level
+  const between = new Map(); // cell -> its piece of the card half-way between the themes
   if (motion && S.overlay) {
     const boxes = flipBoxes();
     const shots = await Promise.all(boxes.map((el) => snapshot(el)));
@@ -1667,46 +1735,35 @@ const switchTheme = safely(async function switchTheme(dark, preShots = null, fro
         for (const [i, f] of slicesOf(shot, bg)) S.overlay.set(i, f);
         const old = oldShots.get(boxes[k]);
         if (!old || old.canvas.width !== shot.canvas.width || old.canvas.height !== shot.canvas.height) return;
-        BLENDS.forEach((a, n) => {
-          const c = document.createElement('canvas');
-          c.width = shot.canvas.width;
-          c.height = shot.canvas.height;
-          const x = c.getContext('2d');
-          x.drawImage(old.canvas, 0, 0);
-          x.globalAlpha = a;
-          x.drawImage(shot.canvas, 0, 0);
-          for (const [i, f] of slicesOf({ canvas: c, rect: shot.rect }, bg)) {
-            if (!between.has(i)) between.set(i, []);
-            between.get(i)[n] = f;
-          }
-        });
+        const c = document.createElement('canvas');
+        c.width = shot.canvas.width;
+        c.height = shot.canvas.height;
+        const x = c.getContext('2d');
+        x.drawImage(old.canvas, 0, 0);
+        x.globalAlpha = 0.5;
+        x.drawImage(shot.canvas, 0, 0);
+        for (const [i, f] of slicesOf({ canvas: c, rect: shot.rect }, bg)) between.set(i, f);
       });
     }
   }
   const field = motionField('ripple', 1, origin);
   const ahead = THEME_AHEAD; // the switch has already answered; the ripple follows straight away
   veilWipe(field, ahead + 30 + FLIP_STEP + FLIP_DUR / 2, WAVE_MS); // the front sits where switches are half-way through
-  let end = 0;
-  retarget(
-    allCells(),
-    (i, to) => {
-      const delay = ahead + field.tau(...cellCentre(i)) + rand() * 25;
+  const last = retargetWave(
+    field,
+    ahead,
+    (i, to, delay) => {
       const onBox = S.overlay && (S.overlay.has(i) || before.has(i));
       // One blended step half-way: the front reads as an even gradient rather than speckle.
-      const levels = [0];
       let steps = null;
       const blended = between.get(i);
-      if (blended) steps = levels.map((n) => blended[n]).filter(Boolean);
+      if (blended) steps = [blended];
       else {
-        const from = board.cells[i].cur;
-        const a = faceColour(from);
+        const a = faceColour(board.cells[i].cur);
         const b = faceColour(to);
-        if (a && b && a !== b) steps = levels.map((n) => solid(mixLch(a, b, BLENDS[n])));
+        if (a && b && a !== b) steps = [solid(mixLch(a, b, 0.5))];
       }
-      const stepDur = FLIP_STEP;
-      const dur = FLIP_DUR;
-      end = Math.max(end, delay + (steps ? steps.length : 0) * stepDur + dur + 200);
-      const base = { delay, dur, gap: board.gapColor, steps, stepDur };
+      const base = { delay, dur: FLIP_DUR, gap: board.gapColor, steps, stepDur: FLIP_STEP };
       return onBox ? { ...base, edgesIn: ahead, edgesOut: S.overlay.has(i) ? 170 : 0 } : base;
     },
     () => true, // every switch flips, background included, so the gutters change in the same ripple
@@ -1717,7 +1774,7 @@ const switchTheme = safely(async function switchTheme(dark, preShots = null, fro
     return;
   }
   if (S.overlay) {
-    await wait(Math.min(end, 2200));
+    await wait(Math.min(last + FLIP_STEP + FLIP_DUR + 200, 2200));
     if (token === morphToken) finishWeb();
   }
 });
@@ -1792,7 +1849,8 @@ function sweepStep(now) {
   const sw = S.sweep;
   // The maps, refreshed as the pattern moves (in OKLab, so blends never dip through grey). (The
   // first are the colours the board was showing, so starting a sweep computes nothing new.)
-  if (!sw.b || (sw.field !== paint.field && now - sw.at > 100)) {
+  const fresh = !sw.b || (sw.field !== paint.field && now - sw.at > 100);
+  if (fresh) {
     sw.at = now;
     const toLab = (rgb) => {
       const out = new Float32Array(rgb.length);
@@ -1849,8 +1907,9 @@ function sweepStep(now) {
         continue;
       }
     }
-    // Ahead of the freeze the old colours drift on, behind the front the new ones.
-    if (c.anim || c.q.length) continue;
+    // Ahead of the freeze the old colours drift on, behind the front the new ones (looked at
+    // when the maps have moved on: in between they say the same).
+    if (!fresh || c.anim || c.q.length) continue;
     const m = sw.turned[i] ? sw.b : sw.srcs[sw.src[i]].lab;
     const [r, g, b] = labToRgb(m[k], m[k + 1], m[k + 2]);
     if ((r - c.r) ** 2 + (g - c.g) ** 2 + (b - c.b) ** 2 > th2) {
