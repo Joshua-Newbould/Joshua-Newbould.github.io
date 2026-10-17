@@ -4,11 +4,11 @@
 // again. Everything here is built for that: the board (board.js), the background (paint.js),
 // the design system and its variations (design.js), and the transitions below.
 
-import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=fb17f6c';
-import { GLBoard } from './glboard.js?v=fb17f6c';
-import { Paint } from './paint.js?v=fb17f6c';
-import { watchCodes } from './secrets.js?v=fb17f6c';
-import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=fb17f6c';
+import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=4acb473';
+import { GLBoard } from './glboard.js?v=4acb473';
+import { Paint } from './paint.js?v=4acb473';
+import { watchCodes } from './secrets.js?v=4acb473';
+import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=4acb473';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = (s, r = document) => r.querySelector(s);
@@ -889,7 +889,7 @@ function inlinedCss() {
   if (!cssText) {
     cssText = (async () => {
       const xml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-      const css = (await (await fetch('css/style.css?v=fb17f6c')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
+      const css = (await (await fetch('css/style.css?v=4acb473')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
       const faces = new Map();
       for (const [block] of css.matchAll(/@font-face\s*{[^}]*}/g)) {
         const url = block.match(/url\("([^"]+)"\)/)[1];
@@ -1472,9 +1472,12 @@ const webGo = safely(async function webGo(go, { dir = 1, toKey = null, fromNothi
     go();
   };
   pendingApply = apply;
-  // Flipping to another part of the same card leaves the header and footer alone.
+  // Flipping to another part of the same card leaves the header and footer alone. Bars that are
+  // switches already (a wave from or to the title still running) stay switches and flip with
+  // this wave, to the next screen's bars (or away, to the title).
   const samePage = fromKey === toKey;
-  const barsSweep = fromKey !== 'intro' && toKey !== 'intro' && !fromNothing && !samePage;
+  const barsAway = !fromNothing && headerEl().style.opacity === '0';
+  const barsSweep = fromKey !== 'intro' && toKey !== 'intro' && !fromNothing && !samePage && !barsAway;
   // Bars that change colour in place keep any part-wiped copy (see veilRedirect). Bars that
   // join the wave as switches keep it too, frozen, and it is wiped away by this wave's front.
   const freezeVeil = !barsSweep && !samePage && themeVeil.children.length > 0;
@@ -1516,6 +1519,7 @@ const webGo = safely(async function webGo(go, { dir = 1, toKey = null, fromNothi
   apply();
   if (!samePage) startSweep(sweepFrom, motionField(look.motion, dir, origin), PAGE_AHEAD - SWEEP_BAND / 2, gapFrom, fromFrame); // (half-way through its blend as the cards flip)
   const boxes = waveBoxes(S.key, fromNothing ? null : fromKey);
+  if (barsAway && S.key !== 'intro') for (const el of [headerEl(), footerEl()]) if (!boxes.includes(el)) boxes.push(el);
   for (const el of boxes) el.style.opacity = '0';
   layoutWeb();
   const shots = await Promise.all(boxes.map((el) => snapshot(el)));
@@ -2372,7 +2376,7 @@ async function playBadApple() {
   let frames;
   let Player;
   try {
-    const mod = await import('./badapple.js?v=fb17f6c');
+    const mod = await import('./badapple.js?v=4acb473');
     Player = mod.Player;
     frames = await mod.loadFrames('assets/badapple.bin');
   } catch (err) {
