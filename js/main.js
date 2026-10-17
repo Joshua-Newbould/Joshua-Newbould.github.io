@@ -4,11 +4,11 @@
 // again. Everything here is built for that: the board (board.js), the background (paint.js),
 // the design system and its variations (design.js), and the transitions below.
 
-import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=749e5c8';
-import { GLBoard } from './glboard.js?v=749e5c8';
-import { Paint } from './paint.js?v=749e5c8';
-import { watchCodes } from './secrets.js?v=749e5c8';
-import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=749e5c8';
+import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=babd46c';
+import { GLBoard } from './glboard.js?v=babd46c';
+import { Paint } from './paint.js?v=babd46c';
+import { watchCodes } from './secrets.js?v=babd46c';
+import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=babd46c';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = (s, r = document) => r.querySelector(s);
@@ -24,6 +24,8 @@ const rand = Math.random;
 const pick = (a) => a[(rand() * a.length) | 0];
 const randInt = (a, b) => a + ((rand() * (b - a + 1)) | 0);
 const wait = (ms) => new Promise((res) => setTimeout(res, ms));
+/** Resolves just after the next frame has been drawn. */
+const nextFrame = () => new Promise((res) => requestAnimationFrame(() => setTimeout(res)));
 const clean = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
 const esc = (t) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
@@ -887,7 +889,7 @@ function inlinedCss() {
   if (!cssText) {
     cssText = (async () => {
       const xml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-      const css = (await (await fetch('css/style.css?v=749e5c8')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
+      const css = (await (await fetch('css/style.css?v=babd46c')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
       const faces = new Map();
       for (const [block] of css.matchAll(/@font-face\s*{[^}]*}/g)) {
         const url = block.match(/url\("([^"]+)"\)/)[1];
@@ -1501,6 +1503,10 @@ const webGo = safely(async function webGo(go, { dir = 1, toKey = null, fromNothi
       return finishWeb();
     }
     for (const i of added) before.add(i);
+    // (The old boxes are switches now, which looks the same: the next screen is set up after the
+    // frame, so the click's own task stays short.)
+    await nextFrame();
+    if (token !== morphToken) return;
   }
   // Lay out the next screen invisibly and slice its changing boxes. Its colours sweep across
   // the background from this moment (see startSweep), in step with the switches' wave.
@@ -2375,7 +2381,7 @@ async function playBadApple() {
   let frames;
   let Player;
   try {
-    const mod = await import('./badapple.js?v=749e5c8');
+    const mod = await import('./badapple.js?v=babd46c');
     Player = mod.Player;
     frames = await mod.loadFrames('assets/badapple.bin');
   } catch (err) {
