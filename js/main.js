@@ -237,7 +237,9 @@ function applyLook() {
 }
 
 /** Expose a page's colours (the current one's by default) to CSS. */
+let colourKey = null; // whose colours the page wears now
 function applyColours(key = S.key) {
+  colourKey = key;
   const sc = scheme(key);
   const rs = document.documentElement.style;
   for (const k of ['surface', 'bar', 'line', 'text', 'soft', 'muted', 'accent']) rs.setProperty('--' + k, sc[k]);
@@ -572,7 +574,9 @@ function syncDom() {
 }
 
 /** The footer's previous / next buttons name their pages. */
+let footerFor = null; // whose neighbours the footer names
 function setFooterLabels(id) {
+  footerFor = id;
   const k = pageIndex(id);
   const n = pages.length;
   $('.lbl', prevBtn).textContent = pages[(k - 1 + n) % n].name;
@@ -662,8 +666,11 @@ function layoutWebBoxes() {
   rs.setProperty('--cw', `${cw}px`);
   rs.setProperty('--ch', `${ch}px`);
   rs.setProperty('--inset', `${Math.max(0, x0 + c0 * cw)}px`);
+  // (Where a box is, in CSS pixels, is kept: hidden cards too, for their snapshots' keys.)
+  const boxOf = (el, c, r, w, h) => (el.box = { left: x0 + c * cw, top: y0 + r * ch, width: w * cw - gap, height: h * ch - gap });
   const place = (el, c, r, w, h) => {
-    Object.assign(el.style, { left: `${x0 + c * cw}px`, top: `${y0 + r * ch}px`, width: `${w * cw - gap}px`, height: `${h * ch - gap}px` });
+    const b = boxOf(el, c, r, w, h);
+    Object.assign(el.style, { left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px` });
   };
   // Rows a box needs for its content at a given width (in switches).
   const rowsFor = (el, w) => {
@@ -687,15 +694,18 @@ function layoutWebBoxes() {
   // Header and footer: the roomiest layout that fits on one line each (short screens keep
   // the nav on the header's row as long as they can, since height is what they lack).
   const short = G.cssH <= 560 && G.cssW > G.cssH;
-  m.hd = fitBar(headerEl(), bw * cw - gap, short ? [[], ['compact'], ['compact', 'tight'], ['compact', 'tight', 'abbr'], ['stack', 'tight', 'abbr']] : [[], ['compact'], ['stack'], ['stack', 'tight'], ['stack', 'tight', 'abbr']], m.hd ?? -1);
-  m.ft = fitBar(footerEl(), bw * cw - gap, [[], ['compact'], ['nocopy'], ['nocopy', 'compact'], ['nocopy', 'compact', 'notool'], ['nocopy', 'compact', 'notool', 'arrows']], m.ft ?? -1);
-  {
-    // Header and footer share one inset.
-    const hd = headerEl();
-    const ft = footerEl();
+  // (Header and footer share one inset, the tighter one if either needs it; as that changes what
+  // fits, they are fitted again until it settles.)
+  const hd = headerEl();
+  const ft = footerEl();
+  for (let pass = 0; pass < 3; pass++) {
+    const was = hd.classList.contains('pad-tight');
+    m.hd = fitBar(hd, bw * cw - gap, short ? [[], ['compact'], ['compact', 'tight'], ['compact', 'tight', 'abbr'], ['stack', 'tight', 'abbr']] : [[], ['compact'], ['stack'], ['stack', 'tight'], ['stack', 'tight', 'abbr']], pass ? -1 : m.hd ?? -1);
+    m.ft = fitBar(ft, bw * cw - gap, [[], ['compact'], ['nocopy'], ['nocopy', 'compact'], ['nocopy', 'compact', 'notool'], ['nocopy', 'compact', 'notool', 'arrows']], pass ? -1 : m.ft ?? -1);
     const tight = ['compact', 'stack'].some((c) => hd.classList.contains(c)) || ['compact', 'nocopy'].some((c) => ft.classList.contains(c));
     hd.classList.toggle('pad-tight', tight);
     ft.classList.toggle('pad-tight', tight);
+    if (tight === was || measured.has(mkey)) break;
   }
   // The grid is centred, so its top and bottom rows are cut about equally. Each bar covers its
   // cut row and as many whole rows as its content needs, and is at least BAR_MIN tall where it
@@ -757,7 +767,7 @@ function layoutWebBoxes() {
   siteEl.hidden = sh;
   const tallest = Math.max(...heights.values());
   const topOff = short ? 0 : Math.max(0, Math.floor((room - tallest) / 2));
-  for (const p of pages) if (!p.el.hidden) place(p.el, c0, top + Math.max(0, Math.min(topOff, room - heights.get(p))), span, heights.get(p)); // (never into the footer)
+  for (const p of pages) (p.el.hidden ? boxOf : place)(p.el, c0, top + Math.max(0, Math.min(topOff, room - heights.get(p))), span, heights.get(p)); // (never into the footer)
 
   // The title window sits where the cards sit (same top, same width) and is as tall as the
   // tallest, so entering the site turns one window into the next in place.
@@ -771,7 +781,7 @@ function layoutWebBoxes() {
     const h = Math.min(room, Math.max(m.intro + 2, tallest));
     place(introEl, c0, top + Math.max(0, Math.min(topOff, room - h)), span, h);
   }
-  measured.set(mkey, m);
+  if (document.fonts?.status !== 'loading') measured.set(mkey, m); // (not while a font is on its way: it will measure differently)
 }
 
 /**
@@ -912,29 +922,32 @@ function inlinedCss() {
 
 const esc = (t) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
-// Rendered sections are reused: they only change with their size and place, the look, the theme
-// and what they say (the header's current page, the footer's labels).
+// Rendered sections are reused: they only change with their size and place, their colours,
+// the theme and what they say (the current page, the footer's labels, a card's part, the theme
+// switch). The key is made from what the page holds, never by measuring it (that would make the
+// browser lay the page out), so a prefetch can look up what it has before arranging anything.
+// `o` asks for a box as it will be: { page (whose colours), dark, part, nav, sw (theme switch) }.
 const shotCache = new Map();
-function shotKey(el) {
-  const r = el.getBoundingClientRect();
+function shotKey(el, o = {}) {
+  const page = o.page ?? colourKey;
+  const dark = o.dark ?? S.dark;
+  const sw = o.sw ?? (el === introEl ? $('#intro-theme') : themeToggle).getAttribute('aria-checked');
   const extra =
     el === headerEl()
-      ? nav.find((n) => n.el.hasAttribute('aria-current'))?.id + themeToggle.getAttribute('aria-checked')
+      ? (o.nav ?? nav.find((n) => n.el.hasAttribute('aria-current'))?.id) + sw + S.ascii
       : el === footerEl()
-        ? el.textContent
+        ? (o.nav ?? footerFor) + look.motion
         : el === introEl
-          ? $('#intro-theme').getAttribute('aria-checked')
-          : el.dataset.part || '';
-  const accent = document.documentElement.style.getPropertyValue('--accent');
-  // (The header and title carry the ASCII button, which looks pressed while on.)
-  const tools = el === headerEl() || el === introEl ? `${S.ascii ? 'A' : ''}` : '';
-  return [el.id || el.tagName, extra, tools, accent, S.dark, look.palette, board.dpr, r.left, r.top, r.width, r.height].join('|');
+          ? sw + S.ascii
+          : (o.part ?? el.dataset.part) || '';
+  const b = el.box || el.getBoundingClientRect();
+  return [el.id || el.tagName, extra, makeScheme(page, dark, look).name, dark, look.palette, board.dpr, b.left, b.top, b.width, b.height].join('|');
 }
-function snapshot(el) {
-  const key = shotKey(el);
+function snapshot(el, o = {}) {
+  const key = shotKey(el, o);
   let shot = shotCache.get(key);
   if (!shot) {
-    shot = renderSnapshot(el);
+    shot = renderSnapshot(el, o.sw);
     shotCache.set(key, shot);
     shot.then((x) => x || shotCache.delete(key));
     if (shotCache.size > 64) shotCache.delete(shotCache.keys().next().value);
@@ -943,10 +956,11 @@ function snapshot(el) {
 }
 
 /**
- * Render a laid-out box to a canvas at device resolution (null if the browser can't).
- * The copy of the element is taken synchronously, so callers may change the page straight after.
+ * Render a laid-out box to a canvas at device resolution (null if the browser can't), its theme
+ * switch showing `sw` if given. The copy of the element is taken synchronously, so callers may
+ * change the page straight after.
  */
-function renderSnapshot(el) {
+function renderSnapshot(el, sw) {
   try {
     const rect = el.getBoundingClientRect();
     const w = Math.ceil(rect.width);
@@ -964,8 +978,9 @@ function renderSnapshot(el) {
       for (const prop of KEEP) dst[k].style[prop] = cs[prop];
     });
     clone.style.cssText = el.style.cssText + ';left:0;top:0;opacity:1;visibility:visible;transition:none;';
-    // Keep the knob of the theme switch where it is now.
+    // Keep the knob of the theme switch where it is now (or will be).
     for (const k of clone.querySelectorAll('.tt-knob, .tt-knob svg')) k.style.transition = 'none';
+    if (sw != null) for (const t of clone.querySelectorAll('.theme-switch')) t.setAttribute('aria-checked', sw);
     const html = new XMLSerializer().serializeToString(clone);
     // Wrap the copy exactly as the original sits in the page, so the same CSS rules match it.
     const inner =
@@ -1050,10 +1065,9 @@ let prefetchedFor = '';
 async function prefetchShots() {
   const busy = () => S.overlay || S.brush || goingTo || brushBoxes.size;
   if (busy()) return;
-  // (Nothing that goes into the pictures has changed since the last full run: all are cached.
-  // Each job re-lays the page out just to look its pictures up, so don't.)
+  // (Nothing that goes into the pictures has changed since the last full run: all are cached.)
   const pg0 = pages[pageIndex(S.key)];
-  const sig = [S.key, pg0?.part, S.dark, S.ascii, S.size, look.palette, ...pages.map((p) => comboOf(p.id)), comboOf('intro')].join('|');
+  const sig = [S.key, pg0?.part, S.dark, S.ascii, S.size, look.palette, look.motion, ...pages.map((p) => comboOf(p.id)), comboOf('intro')].join('|');
   if (sig === prefetchedFor) return;
   // Briefly lay a hidden box out (invisibly), copy it, and put everything back — all synchronous.
   const withShown = (el, fn) => {
@@ -1083,64 +1097,78 @@ async function prefetchShots() {
       applyColours();
     }
   };
-  // The header and footer as they look on page `id`.
-  const asOn = (id, el) => {
-    const cur = nav.find((x) => x.el.hasAttribute('aria-current'));
-    cur?.el.removeAttribute('aria-current');
-    nav.find((x) => x.id === id)?.el.setAttribute('aria-current', 'page');
-    setFooterLabels(id);
-    const shot = inColours(id, () => withShown(el, () => snapshot(el)));
-    nav.find((x) => x.id === id)?.el.removeAttribute('aria-current');
-    cur?.el.setAttribute('aria-current', 'page');
-    if (S.key !== 'intro') setFooterLabels(S.key);
-    return shot;
-  };
-  const jobs = [() => visibleBoxes().map((el) => snapshot(el))];
-  // The visible card's other parts, so flipping through them starts at once.
-  jobs.push(() => {
-    const pg = pages[pageIndex(S.key)];
-    if (!pg || pg.parts.length < 2) return null;
+  // A card on part k (whose label is as showPart writes it).
+  const onPart = (pg, k, fn) => {
     const keep = pg.part;
-    const shots = [];
-    for (let k = 0; k < pg.parts.length; k++) {
-      if (k === keep) continue;
-      pg.part = k;
-      showPart(pg);
-      layoutWebBoxes(); // each part has its own height
-      shots.push(snapshot(pg.el));
-    }
-    pg.part = keep;
+    pg.part = k;
     showPart(pg);
-    layoutWebBoxes();
-    return shots;
-  });
-  // The visible card (or title) in the other theme, so the theme switch starts at once too.
-  jobs.push(() => {
-    const root = document.documentElement;
-    S.dark = !S.dark;
-    root.dataset.theme = S.dark ? 'dark' : 'light';
-    applyColours();
     try {
-      return visibleBoxes()
-        .filter((el) => el !== headerEl() && el !== footerEl())
-        .map((el) => snapshot(el));
+      return fn();
     } finally {
-      S.dark = !S.dark;
-      root.dataset.theme = S.dark ? 'dark' : 'light';
-      applyColours();
+      pg.part = keep;
+      showPart(pg);
     }
-  });
-  for (const pg of pages) jobs.push(() => (pg.el.hidden ? inColours(pg.id, () => withShown(pg.el, () => snapshot(pg.el))) : null));
+  };
+  const partLabel = (pg, k) => (pg.parts.length > 1 ? `${k + 1}/${pg.parts.length}` : '');
+  // Each job is one picture: what it will be asked for as (to look it up first), and how to make
+  // it. One per idle moment: each is a long task on a phone.
+  const jobs = visibleBoxes().map((el) => [el, {}, () => snapshot(el)]);
+  const pg = pages[pageIndex(S.key)];
+  // The visible card's other parts, so flipping through them starts at once.
+  if (pg) for (let k = 0; k < pg.parts.length; k++) if (k !== pg.part) jobs.push([pg.el, { part: partLabel(pg, k) }, () => onPart(pg, k, () => snapshot(pg.el, { part: partLabel(pg, k) }))]);
+  // The visible card (or title) in the other theme, as the theme switch will ask for it.
+  const other = { dark: !S.dark, sw: String(!S.dark) };
+  for (const el of visibleBoxes().filter((x) => x !== headerEl() && x !== footerEl())) {
+    jobs.push([
+      el,
+      other,
+      () => {
+        const root = document.documentElement;
+        S.dark = !S.dark;
+        root.dataset.theme = S.dark ? 'dark' : 'light';
+        applyColours();
+        try {
+          return snapshot(el, other);
+        } finally {
+          S.dark = !S.dark;
+          root.dataset.theme = S.dark ? 'dark' : 'light';
+          applyColours();
+        }
+      },
+    ]);
+  }
+  // The other cards.
+  for (const p of pages) {
+    if (!p.el.hidden) continue;
+    const o = { page: p.id };
+    jobs.push([p.el, o, () => inColours(p.id, () => withShown(p.el, () => snapshot(p.el, o)))]);
+  }
   // The bars only turn into switches on the way in from the title (to About, mostly).
-  if (S.key === 'intro') jobs.push(() => [asOn('about', headerEl()), asOn('about', footerEl())]);
-  jobs.push(() => (introEl.hidden ? inColours('intro', () => withShown(introEl, () => snapshot(introEl))) : null));
-  // One job per idle moment: a job whose pictures are all cached finishes without ever waiting,
-  // and a run of them in one go is a long task just as a wave settles (or a click arrives).
+  if (S.key === 'intro') {
+    for (const el of [headerEl(), footerEl()]) {
+      const o = { page: 'about', nav: 'about' };
+      jobs.push([
+        el,
+        o,
+        () => {
+          nav.find((x) => x.id === 'about').el.setAttribute('aria-current', 'page');
+          setFooterLabels('about');
+          try {
+            return inColours('about', () => withShown(el, () => snapshot(el, o)));
+          } finally {
+            nav.find((x) => x.id === 'about').el.removeAttribute('aria-current');
+          }
+        },
+      ]);
+    }
+  }
+  if (introEl.hidden) jobs.push([introEl, { page: 'intro' }, () => inColours('intro', () => withShown(introEl, () => snapshot(introEl, { page: 'intro' })))]);
   const idle = () => new Promise((r) => (window.requestIdleCallback ? requestIdleCallback(r, { timeout: 1000 }) : setTimeout(r, 16)));
-  for (const job of jobs) {
+  for (const [el, o, make] of jobs) {
+    if (shotCache.has(shotKey(el, o))) continue;
     await idle();
     if (busy()) return;
-    await Promise.all([].concat(job()));
+    await make();
   }
   if (!busy()) prefetchedFor = sig;
 }
