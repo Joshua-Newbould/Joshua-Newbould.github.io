@@ -21,21 +21,9 @@
   font-display: swap;
 }
 @font-face {
-  font-family: "Space Grotesk";
-  src: url("../assets/fonts/space-grotesk-latin-700-normal.woff2") format("woff2");
-  font-weight: 700;
-  font-display: swap;
-}
-@font-face {
   font-family: "Inter Tight";
   src: url("../assets/fonts/inter-tight-latin-800-normal.woff2") format("woff2");
   font-weight: 800;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Chakra Petch";
-  src: url("../assets/fonts/chakra-petch-latin-700-normal.woff2") format("woff2");
-  font-weight: 700;
   font-display: swap;
 }
 
@@ -53,22 +41,11 @@
   --muted: #636a72;
   --accent: #414853;
   --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --display: "Space Grotesk", "Inter Tight", "Helvetica Neue", Arial, sans-serif;
-  --display-weight: 700;
-  --display-track: -0.02em;
-  --display-scale: 1; /* the display face's size, relative to the type scale */
-  --shadow: rgb(0 0 0 / 0.26);
-}
-[data-font="inter"] {
   --display: "Inter Tight", "Helvetica Neue", Arial, sans-serif;
   --display-weight: 800;
   --display-track: -0.025em;
-  --display-scale: 0.91; /* (it runs large) */
-}
-[data-font="chakra"] {
-  --display: "Chakra Petch", "Space Grotesk", Arial, sans-serif;
-  --display-weight: 700;
-  --display-track: 0;
+  --display-scale: 0.91; /* the display face's size, relative to the type scale (it runs large) */
+  --shadow: rgb(0 0 0 / 0.26);
 }
 [data-theme="dark"] {
   --shadow: rgb(0 0 0 / 0.55);
@@ -311,45 +288,13 @@ html:not(.js) .foot-opt {
 /* ---------- Header & footer styles ---------- */
 
 /* Hairline: flat, full width, a single rule against the content. */
-[data-chrome="hairline"] #site > header {
+#site > header {
   box-shadow: inset 0 -1px 0 var(--line);
 }
-[data-chrome="hairline"] #site > footer {
+#site > footer {
   box-shadow: inset 0 1px 0 var(--line);
 }
 
-/* Floating: inset panels the width of the content, outlined. */
-[data-chrome="floating"] #site > header,
-[data-chrome="floating"] #site > footer {
-  box-shadow: inset 0 0 0 1px var(--line);
-  padding: 0 28px;
-}
-
-/* Frame: inset panels with corner brackets, like an instrument panel. */
-[data-chrome="frame"] #site > header,
-[data-chrome="frame"] #site > footer,
-[data-chrome="frame"] main section[data-page],
-[data-chrome="frame"] #intro {
-  --br: var(--accent);
-  --bl: 14px;
-  background-image:
-    linear-gradient(var(--br), var(--br)), linear-gradient(var(--br), var(--br)),
-    linear-gradient(var(--br), var(--br)), linear-gradient(var(--br), var(--br)),
-    linear-gradient(var(--br), var(--br)), linear-gradient(var(--br), var(--br)),
-    linear-gradient(var(--br), var(--br)), linear-gradient(var(--br), var(--br));
-  background-size:
-    var(--bl) 1px, 1px var(--bl), var(--bl) 1px, 1px var(--bl),
-    var(--bl) 1px, 1px var(--bl), var(--bl) 1px, 1px var(--bl);
-  background-position:
-    top left, top left, top right, top right,
-    bottom left, bottom left, bottom right, bottom right;
-  background-repeat: no-repeat;
-}
-[data-chrome="frame"] #site > header,
-[data-chrome="frame"] #site > footer {
-  padding: 0 28px;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 70%, transparent);
-}
 /* The nav's page numbers (01 About, 02 Research, …). */
 #site-nav {
   counter-reset: nav;
@@ -800,17 +745,17 @@ html:not(.js) .foot-opt {
 .w-statusline {
   display: none;
 }
-.js[data-card="window"] main section[data-page] {
+.js main section[data-page] {
   padding-top: 0;
   box-shadow: inset 0 0 0 1px var(--line);
 }
-.js[data-card="window"][data-vp] main section[data-page] {
+.js[data-vp] main section[data-page] {
   padding-bottom: 50px;
 }
-.js[data-card="window"] .w-index {
+.js .w-index {
   display: none; /* the title strip says where you are */
 }
-.js[data-card="window"] .w-bar,
+.js .w-bar,
 .js #intro .w-bar {
   display: flex;
   align-items: center;
@@ -857,7 +802,7 @@ html:not(.js) .foot-opt {
 .w-stripes i:nth-child(4) {
   background: var(--st4);
 }
-.js[data-card="window"] .w-statusline,
+.js .w-statusline,
 .js #intro .w-statusline {
   position: absolute;
   left: var(--pad-x);
@@ -870,33 +815,25 @@ html:not(.js) .foot-opt {
   opacity: 0.8;
   white-space: nowrap;
 }
-.js[data-card="window"] main section.paged .w-pager {
-  bottom: 9px;
-  font-size: 10.5px;
-  letter-spacing: 0.18em;
-}
-.js[data-card="window"] main section.paged .w-pager .pg-num {
-  opacity: 0.8;
-}
 /* Console: a window whose title strip is inverted and whose status line reads like a prompt. */
-.js[data-console] :is(main, #intro) .w-bar {
+.js :is(main, #intro) .w-bar {
   background: var(--text);
   color: color-mix(in srgb, var(--surface) 70%, var(--text));
   border-bottom-color: var(--text);
 }
-.js[data-console] :is(main, #intro) .w-path b {
+.js :is(main, #intro) .w-path b {
   color: var(--surface);
 }
-.js[data-console] main section[data-page] {
+.js main section[data-page] {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 45%, var(--surface));
 }
-.js[data-console] main .w-statusline::before,
-.js[data-console] #intro .w-statusline span:first-child::before {
+.js main .w-statusline::before,
+.js #intro .w-statusline span:first-child::before {
   content: ">_";
   color: var(--accent);
   margin-right: -8px;
 }
-.js[data-console] #intro .w-statusline span:first-child::before {
+.js #intro .w-statusline span:first-child::before {
   margin-right: 10px;
 }
 
@@ -906,7 +843,7 @@ html:not(.js) .foot-opt {
   padding-bottom: 50px;
   box-shadow: inset 0 0 0 1px var(--line);
 }
-.js[data-console] #intro {
+.js #intro {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 45%, var(--surface));
 }
 .js #intro .w-bar {
@@ -940,7 +877,7 @@ html:not(.js) .foot-opt {
   right: var(--pad-x);
   justify-content: space-between;
 }
-.js[data-card="window"][data-vp~="phone"] main .w-statusline span + span {
+.js[data-vp~="phone"] main .w-statusline span + span {
   display: none; /* phones: just the section number */
 }
 
@@ -1134,37 +1071,37 @@ html:not(.js) .foot-opt {
 /* Short screens (phones on their side): every pixel of height counts. The window strip is
    slimmer, its status line gives way to the part controls, and the strip (or the nav) names
    the page instead of the big title. */
-.js[data-vp~="short"][data-card="window"] main .w-big,
-.js[data-vp~="short"][data-card="window"] main [data-strip] {
+.js[data-vp~="short"] main .w-big,
+.js[data-vp~="short"] main [data-strip] {
   display: none;
 }
-.js[data-vp~="short"][data-card="window"] .w-bar,
+.js[data-vp~="short"] .w-bar,
 .js[data-vp~="short"] #intro .w-bar {
   height: 22px;
 }
-.js[data-vp~="short"][data-card="window"] main .w-statusline {
+.js[data-vp~="short"] main .w-statusline {
   display: none;
 }
-.js[data-card="window"][data-vp~="short"] main section[data-page] {
+.js[data-vp~="short"] main section[data-page] {
   padding-bottom: 14px;
-}
-.js[data-card="window"][data-vp~="short"] main section[data-page].paged {
-  padding-bottom: 40px;
 }
 /* (Specific enough to win over the phone and short-screen paddings.) */
 .js[data-vp] main section[data-page].paged {
   padding-bottom: 52px;
   touch-action: pinch-zoom; /* a flick turns the part; the browser mustn't take it as a pan */
 }
+.js[data-vp~="short"] main section[data-page].paged {
+  padding-bottom: 40px;
+}
 .js main section.paged .w-pager {
   position: absolute;
   right: calc(var(--pad-x) - 9px); /* the arrows' glyphs line up with the text's right edge */
-  bottom: 12px;
+  bottom: 9px;
   display: flex;
   align-items: center;
   gap: 4px;
   font: 500 10.5px/1 var(--mono);
-  letter-spacing: 0.16em;
+  letter-spacing: 0.18em;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -1197,6 +1134,9 @@ html:not(.js) .foot-opt {
 .w-pager .pg-num {
   min-width: 4.2em;
   text-align: center;
+}
+.js main section.paged .w-pager .pg-num {
+  opacity: 0.8;
 }
 
 .js[data-vp~="phone"] #publications li {
@@ -1316,18 +1256,18 @@ html:not(.js) footer {
   box-shadow: inset 0 0 0 1px var(--muted);
 }
 /* On the title window's inverted strip, its controls are drawn as outlines on the dark. */
-.js[data-console] #intro .w-bar .tool-btn {
+.js #intro .w-bar .tool-btn {
   width: 22px;
   height: 22px;
   background: transparent;
   color: var(--surface);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--surface) 40%, var(--text));
 }
-.js[data-console] #intro .w-bar .tool-btn[aria-pressed="true"] {
+.js #intro .w-bar .tool-btn[aria-pressed="true"] {
   background: var(--surface);
   color: var(--text);
 }
-.js[data-console] #intro .w-bar .tt-track {
+.js #intro .w-bar .tt-track {
   background: transparent;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--surface) 40%, var(--text));
 }

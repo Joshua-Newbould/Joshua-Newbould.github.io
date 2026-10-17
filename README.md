@@ -88,5 +88,5 @@ switch ripples between light and dark. Reduced-motion preferences are respected.
 
 ## Credits
 
-Fonts: IBM Plex Mono, Space Grotesk, Inter Tight and Chakra Petch (SIL Open Font License),
+Fonts: IBM Plex Mono and Inter Tight (SIL Open Font License),
 self-hosted in `assets/fonts`.

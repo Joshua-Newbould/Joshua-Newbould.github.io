@@ -372,7 +372,7 @@ export class GLBoard extends Board {
     this.frameTex = null;
     this.chromeTex = gl.createTexture();
     this.turnTex = gl.createTexture();
-    this.turnOf = null;
+    this.turnSent = false;
     this.atlasTex = null;
     this.atlasCap = 0;
     this.atlasNew = [];
@@ -556,7 +556,7 @@ export class GLBoard extends Board {
     let ul = 0;
     let ux = 0;
     let uy = 0;
-    if (u && (u.t === 'glyph' || u.t === 'tri')) {
+    if (u && u.t === 'glyph') {
       const g = this.picture(u);
       if (g) [uk, ul, ux, uy] = [1, g.layer, g.x, g.y];
       else ok = false;
@@ -689,7 +689,7 @@ export class GLBoard extends Board {
     this.fresh = false;
     this.pending.clear();
     this.sendPictures();
-    if (this.turnOf !== this.flap) this.sendTurn();
+    if (!this.turnSent) this.sendTurn();
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
     gl.useProgram(this.prog);
     gl.viewport(0, 0, this.W, this.H);
@@ -774,7 +774,7 @@ export class GLBoard extends Board {
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, TURN, 1, 0, gl.RED, gl.FLOAT, v);
     this.smooth(gl.TEXTURE_2D, gl.NEAREST);
-    this.turnOf = this.flap;
+    this.turnSent = true;
   }
 
   /** A copy of the board as it is on screen, kept on the GPU: a picture to cut slices from (it

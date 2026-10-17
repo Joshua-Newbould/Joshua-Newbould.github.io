@@ -8,7 +8,7 @@ import { Board, solid, glyph, mosaic, source as imageSource, slice } from './boa
 import { GLBoard } from './glboard.js';
 import { Paint } from './paint.js';
 import { watchCodes } from './secrets.js';
-import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, bgMode, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js';
+import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = (s, r = document) => r.querySelector(s);
@@ -49,11 +49,9 @@ const nextBtn = $('[data-board="next"]');
 // and put each card's contents in one box that can be scaled down to fit the screen.
 for (const pg of pages) {
   const el = pg.el;
-  const index = Object.assign(document.createElement('p'), { className: 'w-index' });
-  index.append(Object.assign(document.createElement('b'), { textContent: pg.num }), pg.label);
   const big = Object.assign(document.createElement('p'), { className: 'w-big', textContent: el.dataset.big || pg.name });
-  for (const n of [index, big]) n.setAttribute('aria-hidden', 'true');
-  el.prepend(index, big);
+  big.setAttribute('aria-hidden', 'true');
+  el.prepend(big);
   for (const li of $$('li[data-code]', el)) li.prepend(Object.assign(document.createElement('span'), { className: 'w-code', textContent: li.dataset.code }));
   for (const li of $$('ol > li[data-year]', el)) {
     li.prepend(Object.assign(document.createElement('span'), { className: 'w-year', textContent: li.dataset.year }));
@@ -66,7 +64,7 @@ for (const pg of pages) {
   // facts and paragraphs (the label and title stay on every part).
   pg.units = [];
   for (const child of fit.children) {
-    if (child.matches('.w-index, .w-big, h2, [data-strip]')) continue;
+    if (child.matches('.w-big, h2, [data-strip]')) continue;
     if (child.matches('ul, ol, dl, .bio')) pg.units.push(...child.children);
     else pg.units.push(child);
   }
@@ -81,7 +79,7 @@ for (const pg of pages) {
     '<button type="button" class="pg-next" aria-label="Next part"><svg class="arr" aria-hidden="true" viewBox="0 0 12 8"><path d="m8 1 3 3-3 3M11 4H1"/></svg></button>';
   el.append(pager);
   pg.pager = pager;
-  // The window style's title strip and status line (hidden in the plain style).
+  // The window's title strip and status line.
   const bar = document.createElement('div');
   bar.className = 'w-bar';
   bar.setAttribute('aria-hidden', 'true');
@@ -188,11 +186,6 @@ const paintThreshold = () => (S.lite ? 22 : 16);
 const paint = new Paint(); // (first: whether there is a real GPU decides how the board is drawn)
 const boardListeners = []; // the board canvas's input handlers (see onBoard)
 let board = makeBoard();
-// (While comparing: ?flap=crisp (the default), clack or snap.)
-{
-  const f = new URLSearchParams(location.search).get('flap');
-  if (['clack', 'snap', 'crisp'].includes(f)) board.flap = f;
-}
 
 /**
  * The board, drawn by the GPU (glboard.js) where there is a real one, else on a 2D canvas: with
@@ -216,10 +209,8 @@ function makeBoard() {
 
 /** The GPU was lost for good: carry on with the board on a 2D canvas. */
 function fallBack() {
-  const flap = board.flap;
   newCanvas();
   board = new Board(canvas);
-  board.flap = flap;
   if (S.player && S.player !== 'loading') S.player.board = board;
   S.size = '';
   build(false);
@@ -244,15 +235,7 @@ const pageIndex = (id) => pages.findIndex((p) => p.id === id);
 // Colours & look
 
 function applyLook() {
-  const root = document.documentElement;
-  root.dataset.font = look.font;
-  root.dataset.chrome = look.chrome;
-  // Console is the window layout with an inverted strip (data-console on top of data-card=window).
-  root.dataset.card = look.card === 'console' ? 'window' : look.card;
-  if (look.card === 'console') root.dataset.console = '';
-  else delete root.dataset.console;
-  root.dataset.theme = S.dark ? 'dark' : 'light';
-  paint.mode = bgMode(look);
+  document.documentElement.dataset.theme = S.dark ? 'dark' : 'light';
 }
 
 /** Expose a page's colours (the current one's by default) to CSS. */
@@ -623,7 +606,6 @@ function layoutWebBoxes() {
   // on phones too there is a band of board either side.
   const span = Math.min(G.cols - (narrow ? 8 : 2 * margin * 2), Math.ceil(880 / cw));
   const c0 = Math.floor((G.cols - span) / 2);
-  const inset = look.chrome !== 'hairline'; // Floating & Frame: header and footer as wide as the content
   const rs = document.documentElement.style;
   rs.setProperty('--cw', `${cw}px`);
   rs.setProperty('--ch', `${ch}px`);
@@ -647,8 +629,7 @@ function layoutWebBoxes() {
     return r;
   };
 
-  const bw = inset ? span : all;
-  const bc = inset ? c0 : 0;
+  const bw = all;
   // Header and footer: the roomiest layout that fits on one line each (short screens keep
   // the nav on the header's row as long as they can, since height is what they lack).
   const short = G.cssH <= 560 && G.cssW > G.cssH;
@@ -666,7 +647,7 @@ function layoutWebBoxes() {
   // cut row and as many whole rows as its content needs, and is at least BAR_MIN tall where it
   // shows: the header and footer come out the same height (their content in the visible part).
   const cutTop = Math.max(0, -G.oy / G.dpr); // (hidden above the window)
-  const over = inset ? 0 : G.rows - rows; // (rows partly below the window)
+  const over = G.rows - rows; // (rows partly below the window)
   const seenBottom = over ? G.cssH - (G.oy + rows * G.ch) / G.dpr : 0; // (how much of that row shows)
   const barMin = short ? 0 : 40; // (a phone on its side keeps every pixel of height for the cards)
   const contentOf = (el) => {
@@ -686,18 +667,16 @@ function layoutWebBoxes() {
   const hh = (cutTop ? 1 : 0) + Math.max(0, Math.ceil((needH - seenTop + gap) / ch));
   const fh = Math.max(0, Math.ceil((needF - seenBottom + gap) / ch));
   headerEl().style.setProperty('--cut', `${cutTop}px`);
-  const top0 = inset ? 1 : 0;
-  place(headerEl(), bc, top0, bw, hh);
+  place(headerEl(), 0, 0, bw, hh);
   // The full-width footer also covers a part-visible last row; its text stays centred in the visible part.
   if (over) footerEl().style.paddingBottom = `${(over * G.ch) / G.dpr - (G.cssH - (G.oy + rows * G.ch) / G.dpr)}px`;
-  if (inset) place(footerEl(), bc, rows - 1 - fh, bw, fh);
-  else place(footerEl(), 0, rows - fh, all, fh + over);
+  place(footerEl(), 0, rows - fh, all, fh + over);
 
   // Board shows all round the card: a gap under the header and over the footer, and a card
   // no taller than about three quarters of the space (more than that is split into parts).
   const vgap = narrow ? 2 : 1;
-  const top = top0 + hh + vgap;
-  const room = rows - (inset ? 1 : 0) - fh - vgap - top;
+  const top = hh + vgap;
+  const room = rows - fh - vgap - top;
   // A card may use most of the height (more on a portrait screen) before it splits into parts.
   const portrait = G.cssH > G.cssW;
   const maxRows = Math.max(6, Math.floor(room * (portrait ? 0.9 : 0.84)));
@@ -708,7 +687,7 @@ function layoutWebBoxes() {
   for (const p of pages) {
     const hid = p.el.hidden;
     p.el.hidden = false;
-    const key = [span, maxRows, room, cw, ch, look.font, look.chrome, look.card, document.documentElement.dataset.vp].join('|');
+    const key = [span, maxRows, room, cw, ch, document.documentElement.dataset.vp].join('|');
     if (p.fitKey !== key) {
       p.fitKey = key;
       // Short screens may use their whole height; elsewhere a card leaves board above and below.
@@ -848,15 +827,12 @@ const toDataUrl = (blob) =>
     r.onload = () => res(r.result);
     r.readAsDataURL(blob);
   });
-const cssCache = new Map();
-/** The stylesheet with the fonts it needs inlined (only the mono and the chosen display face). */
+let cssText = null;
+/** The stylesheet with its fonts inlined. */
 function inlinedCss() {
-  const font = look.font;
-  if (!cssCache.has(font)) {
-    const keep = { grotesk: 'space-grotesk', inter: 'inter-tight', chakra: 'chakra-petch' }[font];
-    const p = (async () => {
+  if (!cssText) {
+    cssText = (async () => {
       let css = await (await fetch('css/style.css')).text();
-      css = css.replace(/@font-face\s*{[^}]*}/g, (block) => (/ibm-plex-mono/.test(block) || block.includes(keep) ? block : ''));
       const urls = [...new Set([...css.matchAll(/url\("([^"]+\.woff2)"\)/g)].map((m) => m[1]))];
       for (const u of urls) {
         const data = await toDataUrl(await (await fetch(new URL(u, new URL('css/', location.href)))).blob());
@@ -865,12 +841,11 @@ function inlinedCss() {
       // It goes inside XML, so escape what XML would choke on (an '&' in a comment is enough).
       return css.replace(/&/g, '&amp;').replace(/</g, '&lt;');
     })().catch((e) => {
-      cssCache.delete(font);
+      cssText = null;
       throw e;
     });
-    cssCache.set(font, p);
   }
-  return cssCache.get(font);
+  return cssText;
 }
 
 const esc = (t) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -891,7 +866,7 @@ function shotKey(el) {
   const accent = document.documentElement.style.getPropertyValue('--accent');
   // (The header and title carry the ASCII button, which looks pressed while on.)
   const tools = el === headerEl() || el === introEl ? `${S.ascii ? 'A' : ''}` : '';
-  return [el.id || el.tagName, extra, tools, accent, S.dark, look.palette, look.chrome, look.font, document.documentElement.dataset.card + ('console' in document.documentElement.dataset ? '+c' : ''), board.dpr, r.left, r.top, r.width, r.height].join('|');
+  return [el.id || el.tagName, extra, tools, accent, S.dark, look.palette, board.dpr, r.left, r.top, r.width, r.height].join('|');
 }
 function snapshot(el) {
   const key = shotKey(el);
@@ -938,7 +913,7 @@ function renderSnapshot(el) {
           ? `<div id="site" style="position:relative;inset:auto"><main>${html}</main></div>`
           : `<div id="site" style="position:relative;inset:auto">${html}</div>`;
     const root = document.documentElement;
-    const attrs = `data-font="${look.font}" data-chrome="${look.chrome}" data-theme="${root.dataset.theme}" data-vp="${root.dataset.vp || ''}" data-card="${root.dataset.card}"${'console' in root.dataset ? ' data-console=""' : ''}`;
+    const attrs = `data-theme="${root.dataset.theme}" data-vp="${root.dataset.vp || ''}"`;
     const vars = esc(root.style.cssText);
     const dpr = board.dpr;
     return (async () => {
@@ -1117,7 +1092,6 @@ const visibleBoxes = () => (S.key === 'intro' ? [introEl] : [headerEl(), morphBo
  * card's shadow and the header/footer colours can follow the switches exactly.
  *   sweep   diagonally across the board, in the direction of travel
  *   ripple  outwards from what was clicked
- *   cascade down the board, row by row
  */
 // Every wave (page, part or theme) crosses the whole screen in the same time, whatever the
 // screen's size, and every switch in it flips at the same pace: one blend step, then the flip.
@@ -1147,7 +1121,7 @@ function motionField(kind, dir = 1, origin = null) {
     };
   }
   // The shape (ms per column : ms per row), scaled so the far corner is reached in WAVE_MS.
-  const [ax, ay] = kind === 'cascade' ? [1.2, 26] : [6, 9];
+  const [ax, ay] = [6, 9];
   const k = WAVE_MS / Math.max(1, ax * (board.cols - 1) + ay * (board.fullRows - 1));
   const [kx, ky] = [ax * k, ay * k];
   const tau = (x, y) => kx * flip(colOf(x)) + ky * rowOf(y);
@@ -2385,21 +2359,17 @@ function pulseCombo(origin) {
   schedulePrefetch();
 }
 
-/** A design option changed (from the review panel). */
-async function onLookChange(key) {
+/** The palette changed (from the review panel). */
+function onLookChange() {
   cancelWeb();
-  applyLook();
   shotCache.clear();
-  if (key === 'font') await document.fonts.load(`700 64px ${getComputedStyle(document.documentElement).getPropertyValue('--display')}`).catch(() => {});
-  if (key === 'palette') board.gapColor = boardGutter();
+  board.gapColor = boardGutter();
   syncDom();
   S.frame = paint.frame(S.pt, scheme());
   S.lastStep = performance.now();
-  if (key === 'palette' || key === 'bg') {
-    // A gentle sweep of the background into the new look.
-    const field = motionField('sweep', 1);
-    retarget(allCells(), (i) => ({ delay: field.tau(...cellCentre(i)) + rand() * 120, dur: 320, gap: board.gapColor }), () => true);
-  }
+  // A gentle sweep of the background into the new palette.
+  const field = motionField('sweep', 1);
+  retarget(allCells(), (i) => ({ delay: field.tau(...cellCentre(i)) + rand() * 120, dur: 320, gap: board.gapColor }), () => true);
   schedulePrefetch();
 }
 
@@ -2459,7 +2429,7 @@ async function start() {
       document.fonts.load('400 13px "IBM Plex Mono"'),
       document.fonts.load('500 13px "IBM Plex Mono"'),
       document.fonts.load('600 13px "IBM Plex Mono"'),
-      document.fonts.load(`700 64px ${getComputedStyle(document.documentElement).getPropertyValue('--display')}`),
+      document.fonts.load('800 64px "Inter Tight"'),
     ]),
     wait(3000),
   ]).catch(() => {});

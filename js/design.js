@@ -1,35 +1,25 @@
 // The design system: colour schemes built in OKLCH (so lightness and colourfulness stay even
 // across hues), from palettes defined as data below. The chosen palette is kept in localStorage
-// and can be set from the URL (e.g. ?palette=mineral) or from a small panel opened with the D key
+// and can be set from the URL (e.g. ?palette=mineral) or from a small panel opened with Shift+D
 // or ?design.
 
-export const DECISIONS = {
-  palette: { label: 'Palette', options: {} }, // (filled from PALETTES below)
-};
 /** The page transition, chosen by the visitor in the footer. */
 export const MOTIONS = { sweep: 'Sweep', ripple: 'Ripple' };
 
-// Settled by the owner (16 October 2026): hairline header and footer (with the frame style's
-// numbered nav), Inter Tight titles, console sections, the silk background; the switches' crisp
-// fall is built in.
-const SETTLED = { chrome: 'hairline', font: 'inter', card: 'console', bg: 'silk' };
-
-export const DEFAULT_LOOK = { palette: 'jewel', motion: 'sweep', ...SETTLED };
-
-const valid = (k, v) => DECISIONS[k] && Object.hasOwn(DECISIONS[k].options, v);
+// The look is settled (hairline bars with a numbered nav, Inter Tight titles, console sections, the
+// silk background, the crisp fall): only the palette and the transition are still chosen.
+export const DEFAULT_LOOK = { palette: 'jewel', motion: 'sweep' };
 
 export function loadLook() {
-  const look = { ...DEFAULT_LOOK };
+  let saved = {};
   try {
-    Object.assign(look, JSON.parse(localStorage.getItem('look') || '{}'));
+    saved = JSON.parse(localStorage.getItem('look') || '{}');
   } catch {}
-  const q = new URLSearchParams(location.search);
-  for (const k of Object.keys(DECISIONS)) if (q.has(k)) look[k] = q.get(k);
-  for (const k of Object.keys(DECISIONS)) if (!valid(k, look[k])) look[k] = DEFAULT_LOOK[k];
-  Object.assign(look, SETTLED); // (whatever an earlier visit chose)
-  if (!Object.hasOwn(MOTIONS, look.motion)) look.motion = DEFAULT_LOOK.motion;
-  delete look.flip;
-  return look;
+  const palette = new URLSearchParams(location.search).get('palette') || saved.palette;
+  return {
+    palette: Object.hasOwn(PALETTES, palette) ? palette : DEFAULT_LOOK.palette,
+    motion: Object.hasOwn(MOTIONS, saved.motion) ? saved.motion : DEFAULT_LOOK.motion,
+  };
 }
 
 export function saveLook(look) {
@@ -57,9 +47,6 @@ export function oklch(L, C, h) {
   const bl = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s;
   return '#' + [r, g, bl].map((v) => toByte(v).toString(16).padStart(2, '0')).join('');
 }
-
-// ---------------------------------------------------------------------------
-// Schemes
 
 // ---------------------------------------------------------------------------
 // Palettes, as data. For each page, three colour combos (the first is the default; a click on the
@@ -242,8 +229,6 @@ function comboPigments([a, b], dark, th, warmLift) {
   });
 }
 
-for (const [k, p] of Object.entries(PALETTES)) DECISIONS.palette.options[k] = p.label;
-
 const cache = new Map();
 
 /** The title screen's paint: cool, bright whites and silver greys (gunmetal in the dark). */
@@ -295,50 +280,30 @@ export const gutter = (dark, look, page = 'intro') => {
   return oklch(th.gutter[0], th.gutter[1], hl);
 };
 
-/** Which shader the background uses. */
-export const bgMode = (look) => ({ silk: 0, contour: 1, drift: 2 })[look.bg];
-
 // ---------------------------------------------------------------------------
-// Options panel (for reviewing the variations)
+// Palette panel (for reviewing the palettes)
 
 export function mountOptions(look, onChange) {
   const panel = document.createElement('div');
   panel.id = 'design-options';
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'Design options');
-  panel.hidden = true;
-  const render = () => {
-    panel.replaceChildren();
-    const title = Object.assign(document.createElement('p'), { className: 'do-title', textContent: 'Design options' });
-    const hint = Object.assign(document.createElement('p'), { className: 'do-hint', textContent: 'D to close' });
-    panel.append(title, hint);
-    for (const [key, d] of Object.entries(DECISIONS)) {
-      const row = document.createElement('div');
-      row.className = 'do-row';
-      row.append(Object.assign(document.createElement('span'), { textContent: d.label }));
-      for (const [value, name] of Object.entries(d.options)) {
-        const b = Object.assign(document.createElement('button'), { type: 'button', textContent: name });
-        b.setAttribute('aria-pressed', String(look[key] === value));
-        b.dataset.opt = key + ':' + value;
-        b.addEventListener('click', () => {
-          if (look[key] === value) return;
-          look[key] = value;
-          saveLook(look);
-          render();
-          // Keep keyboard focus on the option just chosen (the panel was rebuilt).
-          panel.querySelector(`[data-opt="${key}:${value}"]`)?.focus();
-          onChange(key);
-        });
-        row.append(b);
-      }
-      panel.append(row);
-    }
-  };
-  render();
+  panel.hidden = !new URLSearchParams(location.search).has('design');
+  panel.innerHTML = '<p class="do-title">Design options</p><p class="do-hint">Shift+D to close</p><div class="do-row"><span>Palette</span></div>';
+  const row = panel.querySelector('.do-row');
+  for (const [value, p] of Object.entries(PALETTES)) {
+    const b = Object.assign(document.createElement('button'), { type: 'button', textContent: p.label });
+    b.addEventListener('click', () => {
+      if (look.palette === value) return;
+      look.palette = value;
+      saveLook(look);
+      mark();
+      onChange();
+    });
+    row.append(b);
+  }
+  const mark = () => Object.keys(PALETTES).forEach((v, k) => row.children[k + 1].setAttribute('aria-pressed', String(look.palette === v)));
+  mark();
   document.body.append(panel);
-  const toggle = (show = panel.hidden) => {
-    panel.hidden = !show;
-  };
-  if (new URLSearchParams(location.search).has('design')) toggle(true);
-  return { toggle, render };
+  return { toggle: () => (panel.hidden = !panel.hidden) };
 }

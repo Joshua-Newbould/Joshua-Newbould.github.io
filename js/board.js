@@ -1,6 +1,6 @@
 // The board: a fixed grid of identical split-flap cells drawn on a single canvas.
-// Every face is a flat colour, a character on a flat colour, or — for giant
-// titles only — a crisp slice of a larger piece of type on a flat colour.
+// Every face is a flat colour, a character on a flat colour, a slice of a picture (a section's
+// snapshot) or the brush's little flaps over one of those.
 // Changing a face never swaps pixels directly — the flap physically flips to it.
 
 
@@ -24,23 +24,13 @@ export function glyph(ch, fg, bg, w = 500) {
   return f;
 }
 
-/** A flap cut along its diagonal: `fg` on one side, `bg` on the other — the rounded
- *  corners of giant titles. `code`: 1 = cut top-left, 2 = top-right, 3 = bottom-left, 4 = bottom-right. */
-export function tri(code, fg, bg) {
-  const key = 't' + code + '|' + fg + '|' + bg;
-  let f = glyphs.get(key);
-  if (!f) glyphs.set(key, (f = { t: 'tri', code, fg, bg, key, gk: 'T' + code + '|' + fg }));
-  return f;
-}
-
 /** Wrap a canvas so slices of it can be referenced (and compared) by id. */
 let sourceSeq = 0;
 export function source(canvas) {
   return { id: ++sourceSeq, canvas };
 }
 
-/** One flap-sized window onto a piece of giant type. With `bg` null the flap's
- *  colour comes from the paint beneath it (resolved later); otherwise it is fixed. */
+/** One flap-sized window onto a picture, on the colour `bg`. */
 export function slice(src, sx, sy, bg = null) {
   return { t: 'slice', src, sx, sy, bg, key: 's' + src.id + ':' + sx + ':' + sy + (bg || '') };
 }
@@ -85,35 +75,19 @@ export class Board {
     this.shade = '#000'; // the flip's shading colour, and its strength
     this.shadeK = 1;
     this.shades = new Map(); // gutter colour -> the shading that goes with it
-    this.flap = 'crisp'; // how a flap falls (see turn); 'clack' and 'snap' are kept to compare
   }
 
   /** How much longer than asked every flip takes. (A smaller flap falls faster, as a pendulum
    *  does: `sizeScale` is the square root of its height against a normal switch's.) */
   get durScale() {
-    return (this.flap === 'snap' ? 1.12 : 1.35) * (this.sizeScale || 1);
+    return 1.35 * (this.sizeScale || 1);
   }
 
-  /**
-   * How far the top flap has turned over its hinge at progress p (0 … 1; 1 = flat down).
-   *   clack  a real flap: it tips slowly, falls faster and faster, strikes, and bounces twice,
-   *          smaller each time, before it lies still
-   *   snap   the same, quicker, with one small bounce
-   *   crisp  a firm drop that eases into its landing
-   */
+  /** How far the top flap has turned over its hinge at progress p (0 … 1; 1 = flat down): a firm
+   *  drop that eases into its landing. */
   turn(p) {
-    if (this.flap === 'crisp') {
-      const q = p ** 1.3;
-      return q * q * (3 - 2 * q);
-    }
-    const snap = this.flap === 'snap';
-    const land = snap ? 0.74 : 0.78; // (the moment it strikes)
-    if (p < land) {
-      const u = p / land;
-      return snap ? 0.1 * u + 0.9 * u ** 2.6 : 0.2 * u + 0.8 * u ** 2.2;
-    }
-    const v = (p - land) / (1 - land);
-    return snap ? 1 - 0.045 * Math.sin(Math.PI * v) * (1 - v) : 1 - 0.075 * Math.abs(Math.sin(2 * Math.PI * v)) * (1 - v) ** 1.6;
+    const q = p ** 1.3;
+    return q * q * (3 - 2 * q);
   }
 
   /** Change the colour of the gutters between flaps at once (on start-up).
@@ -234,7 +208,7 @@ export class Board {
   }
 
   /**
-   * A face's picture (a character, a title's corner, the brush's little flaps) as a slot in the
+   * A face's picture (a character, or the brush's little flaps) as a slot in the
    * glyph atlas, { c: canvas, x, y }, fw × fh. All the pictures share a few large canvases, so
    * thousands of flaps drawing them are a few textures for the GPU, not thousands.
    */
@@ -307,15 +281,6 @@ export class Board {
           x.fillRect(x0, y0 + Math.round(h / 2), w, 1); // (the hinge)
         }
       }
-      return c;
-    }
-    if (f.t === 'tri') {
-      const { fw, fh } = gm;
-      const corners = { 1: [[fw, 0], [fw, fh], [0, fh]], 2: [[0, 0], [fw, fh], [0, fh]], 3: [[0, 0], [fw, 0], [fw, fh]], 4: [[0, 0], [fw, 0], [0, fh]] }[f.code];
-      x.fillStyle = f.fg;
-      x.beginPath();
-      corners.forEach(([px, py], k) => (k ? x.lineTo(px, py) : x.moveTo(px, py)));
-      x.fill();
       return c;
     }
     x.font = `${f.w} ${gm.fontPx}px ${MONO}`;
@@ -469,7 +434,7 @@ export class Board {
     }
     ctx.fillStyle = f.bg;
     ctx.fillRect(x, dy, gm.fw, dh);
-    if (f.t === 'glyph' || f.t === 'tri' || f.t === 'mosaic') {
+    if (f.t === 'glyph' || f.t === 'mosaic') {
       const g = this.glyph(f, gm);
       ctx.drawImage(g.c, g.x, g.y + py, gm.fw, ph, x, dy, gm.fw, dh);
     }
@@ -510,7 +475,7 @@ export class Board {
       ctx.fillStyle = f.bg || this.gapColor;
       ctx.fillRect(x, y, w, h);
       if (f.t === 'slice') ctx.drawImage(f.src.canvas, f.sx, f.sy, w, h, x, y, w, h);
-      else if (f.t === 'glyph' || f.t === 'tri' || f.t === 'mosaic') {
+      else if (f.t === 'glyph' || f.t === 'mosaic') {
         const g = this.glyph(f, gm);
         ctx.drawImage(g.c, g.x, g.y, gm.fw, gm.fh, x, y, gm.fw, gm.fh);
       }
