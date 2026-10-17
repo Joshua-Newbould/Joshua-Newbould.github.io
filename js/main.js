@@ -360,12 +360,14 @@ const concrete = (f, i) => f || paintFace(S.frame.rgb[i * 3], S.frame.rgb[i * 3 
 /** The overall colour of a face, for blending between faces. */
 const faceColour = (f) => f.avg || f.bg;
 
-function rememberPaint(c, stagger = false) {
+/** Remember the colour a switch shows, now (and `ago`, the background a little while back: see
+ *  staggerMemory). */
+function rememberPaint(c, ago = null) {
   const k = c.i * 3;
   c.r = S.frame.rgb[k];
   c.g = S.frame.rgb[k + 1];
   c.b = S.frame.rgb[k + 2];
-  if (stagger) staggerMemory(c, k);
+  if (ago) staggerMemory(c, k, ago);
 }
 
 /**
@@ -374,8 +376,7 @@ function rememberPaint(c, stagger = false) {
  * "just flipped" and "about to": set its remembered colour a uniformly random fraction of the
  * flip threshold behind, along the way its colour is moving, so the drift carries on unbroken.
  */
-function staggerMemory(c, k) {
-  const ago = recentPast();
+function staggerMemory(c, k, ago) {
   let dr = c.r - ago[k];
   let dg = c.g - ago[k + 1];
   let db = c.b - ago[k + 2];
@@ -397,6 +398,7 @@ const recentPast = () => paint.frame(scheme(), true).rgb;
  *  `force(i)` flips a switch even if its face hasn't changed. */
 function retarget(indices, how, force = null) {
   const pk = 'paint:' + scheme().name + (S.dark ? 'd' : 'l') + look.palette;
+  let ago = null;
   for (const i of indices) {
     const abs = faceAt(i);
     const key = abs ? abs.key : pk;
@@ -411,7 +413,7 @@ function retarget(indices, how, force = null) {
     c.key = key;
     c.abs = abs;
     if (S.sweep) S.sweep.turned[i] = 1; // (flipped here, so the sweep's front leaves it be)
-    if (isPaint(abs)) rememberPaint(c, true);
+    if (isPaint(abs)) rememberPaint(c, (ago ||= recentPast()));
     const f = concrete(abs, i);
     const opts = how && !reduce.matches ? how(i, f) : null;
     if (opts) board.flip(c, f, opts);
@@ -430,27 +432,20 @@ function retargetWave(field, ahead, how, force) {
   const t0 = performance.now();
   // (In order of arrival, roughly: by 40 ms slices of the wave.)
   const slices = [];
+  const delays = new Float32Array(board.cells.length);
   let last = 0;
   for (let i = 0; i < board.cells.length; i++) {
-    const d = ahead + field.tau(...cellCentre(i)) + rand() * 25;
+    const d = (delays[i] = ahead + field.tau(...cellCentre(i)) + rand() * 25);
     last = Math.max(last, d);
-    (slices[(d / 40) | 0] ||= []).push(i, d);
+    (slices[(d / 40) | 0] ||= []).push(i);
   }
-  const delays = new Map();
+  const order = slices.flat();
   const step = (k) => {
     const until = performance.now() + 3;
     const late = performance.now() - t0;
-    for (; k < slices.length && (performance.now() < until || reduce.matches); k++) {
-      const sl = slices[k];
-      if (!sl) continue;
-      const idx = [];
-      for (let n = 0; n < sl.length; n += 2) {
-        idx.push(sl[n]);
-        delays.set(sl[n], Math.max(0, sl[n + 1] - late));
-      }
-      retarget(idx, (i, to) => how(i, to, delays.get(i)), force);
-    }
-    if (k < slices.length) requestAnimationFrame(() => token === morphToken && step(k));
+    const flip = (i, to) => how(i, to, Math.max(0, delays[i] - late));
+    for (; k < order.length && (reduce.matches || performance.now() < until); k += 32) retarget(order.slice(k, k + 32), flip, force);
+    if (k < order.length) requestAnimationFrame(() => token === morphToken && step(k));
   };
   step(0);
   return last;
@@ -900,18 +895,22 @@ const toDataUrl = (blob) =>
     r.readAsDataURL(blob);
   });
 let cssText = null;
-/** The stylesheet with its fonts inlined. */
+/** The stylesheet for snapshots, as { rules, faces }: the rules without comments and spare spaces
+ *  (every snapshot parses them), and each font as an @font-face with its file inlined, by
+ *  'family|weight' (a snapshot takes only the ones it uses). Escaped for XML. */
 function inlinedCss() {
   if (!cssText) {
     cssText = (async () => {
-      let css = await (await fetch('css/style.css')).text();
-      const urls = [...new Set([...css.matchAll(/url\("([^"]+\.woff2)"\)/g)].map((m) => m[1]))];
-      for (const u of urls) {
-        const data = await toDataUrl(await (await fetch(new URL(u, new URL('css/', location.href)))).blob());
-        css = css.split(u).join(data);
+      const xml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      const css = (await (await fetch('css/style.css')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
+      const faces = new Map();
+      for (const [block] of css.matchAll(/@font-face\s*{[^}]*}/g)) {
+        const url = block.match(/url\("([^"]+)"\)/)[1];
+        const data = await toDataUrl(await (await fetch(new URL(url, new URL('css/', location.href)))).blob());
+        faces.set(block.match(/font-family:\s*"([^"]+)"/)[1] + '|' + block.match(/font-weight:\s*(\d+)/)[1], xml(block.replace(url, data)));
       }
-      // It goes inside XML, so escape what XML would choke on (an '&' in a comment is enough).
-      return css.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      const rules = css.replace(/@font-face\s*{[^}]*}/g, '').replace(/\s+/g, ' ').replace(/ ?([{};,>]) ?/g, '$1');
+      return { rules: xml(rules), faces };
     })().catch((e) => {
       cssText = null;
       throw e;
@@ -919,7 +918,23 @@ function inlinedCss() {
   }
   return cssText;
 }
+/** The @font-face rules for the faces a copied box uses (each 'family|weight' asked for, or the
+ *  family's nearest weight). */
+function fontsFor(faces, used) {
+  const out = new Set();
+  for (const u of used) {
+    const [fam, w] = u.split('|');
+    let best = null;
+    for (const k of faces.keys()) {
+      const [f, kw] = k.split('|');
+      if (f === fam && (!best || Math.abs(kw - w) < Math.abs(best.split('|')[1] - w))) best = k;
+    }
+    if (best) out.add(faces.get(best));
+  }
+  return [...out].join('');
+}
 
+const KEEP = ['font-size', 'line-height', 'letter-spacing', 'font-weight', 'font-family', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left', 'row-gap', 'column-gap', 'grid-template-columns', 'color', 'text-transform', 'text-decoration-line', 'text-decoration-color', 'text-decoration-thickness', 'text-underline-offset'];
 const esc = (t) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
 // Rendered sections are reused: they only change with their size and place, their colours,
@@ -969,13 +984,16 @@ function renderSnapshot(el, sw) {
     clone.removeAttribute('hidden');
     // Freeze every element's computed sizes: inside the snapshot, viewport units would
     // otherwise resolve against the image rather than the window.
-    const KEEP = ['fontSize', 'lineHeight', 'letterSpacing', 'fontWeight', 'fontFamily', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
-      'marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'rowGap', 'columnGap', 'gridTemplateColumns', 'color', 'textTransform', 'textDecorationLine', 'textDecorationColor', 'textDecorationThickness', 'textUnderlineOffset'];
     const src = [el, ...el.querySelectorAll('*')];
     const dst = [clone, ...clone.querySelectorAll('*')];
+    const used = new Set(); // (the fonts it is set in)
     src.forEach((node, k) => {
       const cs = getComputedStyle(node);
-      for (const prop of KEEP) dst[k].style[prop] = cs[prop];
+      // (Text in it: generated text, such as the nav's numbers, is set as text beside it is.)
+      for (const t of node.childNodes) if (t.nodeType === 3 && t.data.trim()) used.add(cs.fontFamily.split(',')[0].replace(/"/g, '').trim() + '|' + cs.fontWeight);
+      let style = dst[k].getAttribute('style') || '';
+      for (const prop of KEEP) style += `;${prop}:${cs.getPropertyValue(prop)}`;
+      dst[k].setAttribute('style', style); // (one write, not one per property)
     });
     clone.style.cssText = el.style.cssText + ';left:0;top:0;opacity:1;visibility:visible;transition:none;';
     // Keep the knob of the theme switch where it is now (or will be).
@@ -994,7 +1012,10 @@ function renderSnapshot(el, sw) {
     const vars = esc(root.style.cssText);
     const dpr = board.dpr;
     return (async () => {
-      const css = await inlinedCss();
+      const { rules, faces } = await inlinedCss();
+      const css = fontsFor(faces, used) + rules;
+      // (Reading the picture is a long task on a phone: not in the same one as the copying.)
+      await new Promise((r) => setTimeout(r));
       const doc = `<div xmlns="http://www.w3.org/1999/xhtml" class="js board" ${attrs} style="${vars};position:relative;width:${w}px;height:${h}px;overflow:hidden;background:transparent">
       <style>${css}</style>
       <div id="source" style="position:relative;inset:auto;width:${w}px;height:${h}px;overflow:visible">${inner}</div></div>`;
@@ -1886,6 +1907,7 @@ function sweepStep(now) {
   }
   const el = now - sw.t0 - sw.lag;
   const th2 = paintThreshold() ** 2;
+  let ago = null;
   for (const c of board.cells) {
     if (!isPaint(c.abs)) continue;
     const i = c.i;
@@ -1906,7 +1928,7 @@ function sweepStep(now) {
         board.flip(c, paintFace(r, g, b), { dur: FLIP_DUR, gap: sw.gapTo, edgesIn: (c.ca ?? 1) < 1 ? 40 : 0 });
         // Now that it shows the current colour, leave it a random way towards its next drift
         // flip (as in steady drift), so they don't all come due again together.
-        staggerMemory(c, k);
+        staggerMemory(c, k, (ago ||= recentPast()));
         continue;
       }
       // An unseen freeze runs SWEEP_FREEZE ms ahead of the front: once it has passed, no drift
