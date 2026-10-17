@@ -259,8 +259,12 @@ const mixHex = (a, b, t) => {
   return rgbHex(...p.map((v, k) => Math.round(v + (q[k] - v) * t)));
 };
 // The same blend in OKLab, where halfway between two colours looks halfway (no muddy dip).
-const toLin = (c) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-const fromLin = (c) => Math.round(255 * Math.min(1, Math.max(0, c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055)));
+// (By table: these run for every switch in a wave. The way back is indexed by the square root,
+// so dark colours, where sRGB is steepest, are finely spaced.)
+const LIN = Float64Array.from({ length: 256 }, (_, i) => ((i /= 255) <= 0.04045 ? i / 12.92 : ((i + 0.055) / 1.055) ** 2.4));
+const SRGB = Uint8Array.from({ length: 4097 }, (_, i) => ((i = (i / 4096) ** 2), Math.round(255 * (i <= 0.0031308 ? 12.92 * i : 1.055 * i ** (1 / 2.4) - 0.055))));
+const toLin = (c) => LIN[c];
+const fromLin = (c) => SRGB[c <= 0 ? 0 : c >= 1 ? 4096 : Math.round(Math.sqrt(c) * 4096)];
 function hexToLab(h) {
   return rgbToLab(...hexToRgb(h));
 }
@@ -381,15 +385,7 @@ function staggerMemory(c, k) {
   c.b -= db * back;
 }
 /** The background as it was a little while ago (about one switch's time between drift flips). */
-function recentPast() {
-  // (One frame per slice of pattern time is plenty for this, and recomputing it every frame is costly.)
-  const key = `${Math.round(S.pt / 0.015)}|${scheme().name}|${S.dark}|${look.palette}|${paint.mode}`;
-  if (recentPast.key !== key) {
-    recentPast.key = key;
-    recentPast.rgb = paint.frame(S.pt - 0.1, scheme()).rgb;
-  }
-  return recentPast.rgb;
-}
+const recentPast = () => paint.frame(scheme(), true).rgb;
 
 /** Bring switches up to date. `how(i, face)` returns flip options, or null to switch at once.
  *  `force(i)` flips a switch even if its face hasn't changed. */
@@ -465,8 +461,8 @@ function build(first) {
     // new colours.)
     if (S.sweep && S.sweep.turned.length !== board.cells.length) S.sweep = null;
     board.sizeScale = Math.sqrt(m.ch / normal.ch);
-    paint.resize(board);
-    S.frame = paint.frame(S.pt, scheme());
+    paint.resize(board, S.small, S.pt);
+    S.frame = paint.frame(scheme());
     S.lastStep = performance.now();
     retarget(allCells(), null);
   } finally {
@@ -489,7 +485,6 @@ function setSmall(mode, { force = false, smooth = false } = {}) {
   if (mode === S.small && !force) return false;
   const shot = smooth && board.cells.length ? board.capture() : null;
   S.small = mode;
-  paint.useCpu = !!mode; // (see paint.frame)
   S.size = '';
   if (!shot) {
     build(false);
@@ -1511,7 +1506,7 @@ function go(key, { dir = 1, push = true, origin = null } = {}) {
       }
       if (themeWanted()) applyTheme(S.wantDark); // a theme switch cut short rides this wave
       syncDom();
-      S.frame = paint.frame(S.pt, scheme());
+      S.frame = paint.frame(scheme());
       keepFocus(from);
     },
     { dir, toKey: key, origin },
@@ -1595,7 +1590,7 @@ function applyTheme(dark) {
   for (const c of board.cells) c.gap = c.gap || oldGap;
   board.gapColor = boardGutter();
   shadeBoard();
-  S.frame = paint.frame(S.pt, scheme());
+  S.frame = paint.frame(scheme());
 }
 
 /** Every click counts: a click mid-ripple turns it round from wherever the switches are. */
@@ -1732,7 +1727,7 @@ const switchTheme = safely(async function switchTheme(dark, preShots = null, fro
 
 function paintStep(now) {
   S.lastStep = now;
-  S.frame = paint.frame(S.pt, scheme());
+  S.frame = paint.frame(scheme());
   if (S.sweep) return; // (while a sweep crosses the board it moves the background on: sweepStep)
   const rgb = S.frame.rgb;
   const th2 = paintThreshold() ** 2;
@@ -1795,14 +1790,10 @@ function startSweep(from, field, lag, gapFrom, fromFrame = null) {
 
 function sweepStep(now) {
   const sw = S.sweep;
-  // The two maps, refreshed as the pattern moves (in OKLab, so blends never dip through grey).
-  // (Without a GPU the maps are computed in JavaScript: the old one once, the new one less often.)
-  // (Each read of the maps waits for the GPU to finish drawing; on small switches there is much
-  // more to draw, so they are read half as often, and the starting maps half as often again.)
-  const fine = board.cells.length > 4000;
-  if (now - sw.at > (S.lite ? 600 : fine ? 240 : 120)) {
+  // The maps, refreshed as the pattern moves (in OKLab, so blends never dip through grey). (The
+  // first are the colours the board was showing, so starting a sweep computes nothing new.)
+  if (!sw.b || (sw.field !== paint.field && now - sw.at > 100)) {
     sw.at = now;
-    sw.reads = (sw.reads || 0) + 1;
     const toLab = (rgb) => {
       const out = new Float32Array(rgb.length);
       for (let k = 0; k < rgb.length; k += 3) {
@@ -1814,12 +1805,10 @@ function sweepStep(now) {
       return out;
     };
     const first = !sw.b;
-    if (!first) S.frame = paint.frame(S.pt, sw.to);
-    for (const f of sw.srcs) {
-      if (!f.lab) f.lab = toLab(f.rgb || paint.frame(S.pt, f.scheme).rgb);
-      else if (!S.lite && (!fine || sw.reads % 2)) f.lab = toLab(paint.frame(S.pt, f.scheme).rgb);
-    }
+    if (!first) S.frame = paint.frame(sw.to);
+    for (const f of sw.srcs) f.lab = toLab(first && f.rgb ? f.rgb : paint.frame(f.scheme).rgb);
     sw.b = toLab(first && sw.toRgb ? sw.toRgb : S.frame.rgb);
+    sw.field = paint.field;
   }
   const el = now - sw.t0 - sw.lag;
   const th2 = paintThreshold() ** 2;
@@ -2336,7 +2325,7 @@ function stopBadApple(e) {
 
 /** Without motion: the background takes its new colours and gutters at once. */
 function settleBackground() {
-  S.frame = paint.frame(S.pt, scheme());
+  S.frame = paint.frame(scheme());
   retarget(allCells(), null, (i) => !faceAt(i));
   for (const c of board.cells) c.gap = null;
   board.redrawAll();
@@ -2353,7 +2342,7 @@ function pulseCombo(origin) {
   setCombo(page, (comboOf(page) + 1) % n);
   applyColours();
   retintGutter();
-  S.frame = paint.frame(S.pt, scheme());
+  S.frame = paint.frame(scheme());
   if (reduce.matches) settleBackground();
   else startSweep(sweepFrom, motionField('ripple', 1, origin), -SWEEP_BAND / 2, gapFrom, fromFrame);
   schedulePrefetch();
@@ -2365,7 +2354,7 @@ function onLookChange() {
   shotCache.clear();
   board.gapColor = boardGutter();
   syncDom();
-  S.frame = paint.frame(S.pt, scheme());
+  S.frame = paint.frame(scheme());
   S.lastStep = performance.now();
   // A gentle sweep of the background into the new palette.
   const field = motionField('sweep', 1);
@@ -2379,6 +2368,7 @@ function onLookChange() {
 function loop(now) {
   if (S.lastNow) S.pt += (Math.min(now - S.lastNow, 250) / 1000) * SPEED;
   S.lastNow = now;
+  paint.tick(now, S.pt, S.lite ? (S.sweep ? 600 : stepMs()) : 100);
   if (!reduce.matches && now - S.lastStep >= stepMs()) paintStep(now);
   if (S.sweep && now - (S.sweepAt || 0) >= (S.lite ? 70 : 34)) {
     S.sweepAt = now;
