@@ -4,10 +4,10 @@
 // again. Everything here is built for that: the board (board.js), the background (paint.js),
 // the design system and its variations (design.js), and the transitions below.
 
-import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=9815574';
-import { GLBoard } from './glboard.js?v=9815574';
-import { Paint } from './paint.js?v=9815574';
-import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=9815574';
+import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=4c6f054';
+import { GLBoard } from './glboard.js?v=4c6f054';
+import { Paint } from './paint.js?v=4c6f054';
+import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=4c6f054';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = (s, r = document) => r.querySelector(s);
@@ -884,7 +884,7 @@ function inlinedCss() {
   if (!cssText) {
     cssText = (async () => {
       const xml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-      const css = (await (await fetch('css/style.css?v=9815574')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
+      const css = (await (await fetch('css/style.css?v=4c6f054')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
       const faces = new Map();
       for (const [block] of css.matchAll(/@font-face\s*{[^}]*}/g)) {
         const url = block.match(/url\("([^"]+)"\)/)[1];
@@ -1065,7 +1065,7 @@ function schedulePrefetch() {
 }
 let prefetchedFor = '';
 async function prefetchShots() {
-  const busy = () => S.overlay || S.brush || goingTo || brushBoxes.size;
+  const busy = () => S.overlay || S.brush || goingTo || brushBoxes.size || S.settling;
   if (busy()) return;
   // (Nothing that goes into the pictures has changed since the last full run: all are cached.)
   const sigNow = () => [S.key, pages[pageIndex(S.key)]?.part, S.dark, S.ascii, S.size, look.palette, look.motion, ...pages.map((p) => comboOf(p.id)), comboOf('intro')].join('|');
@@ -2060,6 +2060,7 @@ function heldFace(s) {
 
 /** Paint around a point (CSS px): every switch the brush covers flips through brushed faces and back. */
 function splash(x, y, again = false) {
+  if (S.settling) return; // (ASCII mode is about to change: see toggleAscii)
   const dpr = board.dpr;
   const cwc = board.cw / dpr;
   const chc = board.ch / dpr;
@@ -2340,16 +2341,34 @@ window.addEventListener('popstate', () => go(keyFromHash() || 'intro', { push: f
 let asciiWait = 0;
 function toggleAscii() {
   // (Once the running transition is done: clicks meanwhile ask for it once, not once each.)
-  if (pendingApply || goingTo || S.overlay || S.sweep) return void (asciiWait ||= setTimeout(() => ((asciiWait = 0), toggleAscii()), 250));
+  if (pendingApply || goingTo || S.overlay || S.sweep || S.settling) return void (asciiWait ||= setTimeout(() => ((asciiWait = 0), toggleAscii()), 250));
   const on = !S.ascii;
-  // The new switches start out showing the board as it was; the ripple turns them over into the
-  // new look (and size).
+  for (const b of $$('.ascii-btn')) b.setAttribute('aria-pressed', String(on)); // (the button answers at once)
+  // The new switches start out showing the board as it was: first every flap in the air lands
+  // (hurried, as ahead of a wave's front) and no new one starts, so none is caught mid-fall.
+  dropBrush();
+  const now = performance.now();
+  let left = 0;
+  for (const c of board.active) {
+    board.dropQueue(c);
+    if (!c.anim) continue;
+    board.hurry(c, 150);
+    left = Math.max(left, c.anim.t0 + c.anim.dur - now);
+  }
+  S.settling = true;
+  setTimeout(() => {
+    S.settling = false;
+    if (pendingApply || goingTo || S.overlay || S.sweep) toggleAscii(); // (a page change came first: after it)
+    else switchAscii(on);
+  }, left + 20);
+}
+function switchAscii(on) {
+  // The ripple turns the new switches over into the new look (and size).
   const held = setSmall(on ? 'ascii' : false, { smooth: true });
   const sweepFrom = scheme();
   const gapFrom = board.gapColor;
   const fromFrame = S.frame;
   S.ascii = on;
-  for (const b of $$('.ascii-btn')) b.setAttribute('aria-pressed', String(S.ascii));
   retintGutter();
   if (reduce.matches) return settleBackground();
   startSweep(sweepFrom, motionField('ripple'), -SWEEP_BAND / 2, gapFrom, fromFrame);
@@ -2403,7 +2422,7 @@ function loop(now) {
   if (S.lastNow) S.pt += (Math.min(now - S.lastNow, 250) / 1000) * SPEED;
   S.lastNow = now;
   paint.tick(now, S.pt, S.lite ? (S.sweep ? 600 : stepMs()) : 100);
-  if (!reduce.matches && now - S.lastStep >= stepMs()) paintStep(now);
+  if (!reduce.matches && !S.settling && now - S.lastStep >= stepMs()) paintStep(now);
   if (S.sweep && now - (S.sweepAt || 0) >= (S.lite ? 70 : 34)) {
     S.sweepAt = now;
     sweepStep(now);
