@@ -4,10 +4,10 @@
 // again. Everything here is built for that: the board (board.js), the background (paint.js),
 // the design system and its variations (design.js), and the transitions below.
 
-import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=4c6f054';
-import { GLBoard } from './glboard.js?v=4c6f054';
-import { Paint } from './paint.js?v=4c6f054';
-import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=4c6f054';
+import { Board, solid, glyph, mosaic, source as imageSource, slice } from './board.js?v=57eec90';
+import { GLBoard } from './glboard.js?v=57eec90';
+import { Paint } from './paint.js?v=57eec90';
+import { MOTIONS, loadLook, saveLook, scheme as makeScheme, gutter, mountOptions, combosOf, comboOf, setCombo, boardHue, oklch as oklchHex } from './design.js?v=57eec90';
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = (s, r = document) => r.querySelector(s);
@@ -884,7 +884,7 @@ function inlinedCss() {
   if (!cssText) {
     cssText = (async () => {
       const xml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-      const css = (await (await fetch('css/style.css?v=4c6f054')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
+      const css = (await (await fetch('css/style.css?v=57eec90')).text()).replace(/\/\*[\s\S]*?\*\//g, '');
       const faces = new Map();
       for (const [block] of css.matchAll(/@font-face\s*{[^}]*}/g)) {
         const url = block.match(/url\("([^"]+)"\)/)[1];
@@ -1827,18 +1827,44 @@ function paintStep(now) {
   S.lastStep = now;
   S.frame = paint.frame(scheme());
   if (S.sweep) return; // (while a sweep crosses the board it moves the background on: sweepStep)
+  for (const c of board.cells) drift(c, paintThreshold() ** 2);
+}
+/** One switch: flip it if its colour has drifted from what it shows by more than the threshold. */
+function drift(c, th2) {
+  if (!isPaint(c.abs) || board.busy(c)) return;
   const rgb = S.frame.rgb;
-  const th2 = paintThreshold() ** 2;
-  for (const c of board.cells) {
-    if (!isPaint(c.abs) || board.busy(c)) continue;
-    const k = c.i * 3;
-    const dr = rgb[k] - c.r;
-    const dg = rgb[k + 1] - c.g;
-    const db = rgb[k + 2] - c.b;
-    if (dr * dr + dg * dg + db * db > th2) {
-      rememberPaint(c);
-      board.flip(c, concrete(null, c.i), { delay: rand() * 500, dur: 440 + rand() * 240 }); // (spread evenly)
+  const k = c.i * 3;
+  const dr = rgb[k] - c.r;
+  const dg = rgb[k + 1] - c.g;
+  const db = rgb[k + 2] - c.b;
+  if (dr * dr + dg * dg + db * db > th2) {
+    rememberPaint(c);
+    board.flip(c, concrete(null, c.i), { delay: rand() * 500, dur: 440 + rand() * 240 }); // (spread evenly)
+  }
+}
+/** The steady drift, a share every frame: the switches in a random order, all of them every
+ *  stepMs, so the work is the same in every frame (at any refresh rate). */
+function driftStep(now) {
+  const cells = board.cells;
+  const n = cells.length;
+  if (S.order?.length !== n) {
+    S.order = Uint32Array.from({ length: n }, (_, i) => i);
+    for (let i = n - 1; i > 0; i--) {
+      const j = (rand() * (i + 1)) | 0;
+      [S.order[i], S.order[j]] = [S.order[j], S.order[i]];
     }
+    S.at = 0;
+  }
+  const share = Math.ceil((n * Math.min(now - S.lastStep, 100)) / stepMs());
+  S.lastStep = now;
+  if (S.sweep) return;
+  const th2 = paintThreshold() ** 2;
+  for (let k = 0; k < share; k++) {
+    if (S.at >= n) {
+      S.at = 0;
+      S.frame = paint.frame(scheme()); // (each round, the background as it is now)
+    }
+    drift(cells[S.order[S.at++]], th2);
   }
 }
 
@@ -1883,7 +1909,14 @@ function startSweep(from, field, lag, gapFrom, fromFrame = null) {
       asciiOld[i] = prev.asciiOld[i];
     }
   }
-  S.sweep = { srcs, src, asciiOld, to: scheme(), t0: performance.now(), lag, tau, turned: new Uint8Array(n), frozen: new Uint8Array(n), end: lag + last + SWEEP_BAND + 60, gapTo: board.gapColor, at: -Infinity, toRgb: S.frame?.rgb };
+  // The switches in the order the front reaches them (by whole ms: a counting sort), so each
+  // frame looks only at the ones it has just reached.
+  const counts = new Uint32Array(Math.ceil(last) + 2);
+  for (let i = 0; i < n; i++) counts[(tau[i] | 0) + 1]++;
+  for (let t = 1; t < counts.length; t++) counts[t] += counts[t - 1];
+  const order = new Uint32Array(n);
+  for (let i = 0; i < n; i++) order[counts[tau[i] | 0]++] = i;
+  S.sweep = { srcs, src, asciiOld, to: scheme(), t0: performance.now(), lag, tau, order, front: 0, freeze: 0, turned: new Uint8Array(n), frozen: new Uint8Array(n), end: lag + last + SWEEP_BAND + 60, gapTo: board.gapColor, at: -Infinity, toRgb: S.frame?.rgb };
 }
 
 function sweepStep(now) {
@@ -1902,59 +1935,76 @@ function sweepStep(now) {
   const el = now - sw.t0 - sw.lag;
   const th2 = paintThreshold() ** 2;
   let ago = null;
-  for (const c of board.cells) {
-    if (!isPaint(c.abs)) continue;
-    const i = c.i;
-    const k = i * 3;
-    const x = (el - sw.tau[i]) / SWEEP_BAND;
-    if (!sw.turned[i]) {
-      if (x >= 0.5) {
-        // The front (half-way through the blend): the switch turns over whatever its threshold,
-        // straight to the new colours (its flip takes about as long as the rest of the blend).
-        // This replaces a drift flip still waiting; one still in motion (the freeze should have
-        // seen to that) is hurried to land first.
-        sw.turned[i] = 1;
-        board.hurry(c, 60);
-        const [r, g, b] = [sw.b[k], sw.b[k + 1], sw.b[k + 2]];
+  // The front (half-way through the blend): a switch turns over whatever its threshold, straight
+  // to the new colours (its flip takes about as long as the rest of the blend). This replaces a
+  // drift flip still waiting; one still in motion (the freeze should have seen to that) is
+  // hurried to land first. Then, as in steady drift, its memory is left a random way towards its
+  // next drift flip, so they don't all come due again together.
+  const turn = (c) => {
+    const k = c.i * 3;
+    sw.turned[c.i] = 1;
+    board.hurry(c, 60);
+    c.r = sw.b[k];
+    c.g = sw.b[k + 1];
+    c.b = sw.b[k + 2];
+    board.flip(c, paintFace(c.r, c.g, c.b), { dur: FLIP_DUR, gap: sw.gapTo, edgesIn: (c.ca ?? 1) < 1 ? 40 : 0 });
+    staggerMemory(c, k, (ago ||= recentPast()));
+  };
+  // An unseen freeze runs SWEEP_FREEZE ms ahead of the front: once it has passed, no drift flip
+  // starts (one still waiting is dropped, one in motion is hurried to land in time), so every
+  // switch is free to turn over the moment the front arrives. (Not while the old board's picture
+  // is held until the front.)
+  const freezeBy = SWEEP_FREEZE * board.durScale;
+  const freeze = (c) => {
+    if (sw.frozen[c.i] || sw.hold) return;
+    sw.frozen[c.i] = 1;
+    board.dropQueue(c);
+    board.hurry(c, Math.max(60, sw.tau[c.i] + SWEEP_BAND / 2 - el - 30));
+  };
+  // Every frame, the switches the front and the freeze have reached since the last.
+  const cells = board.cells;
+  for (; sw.front < sw.order.length && sw.tau[sw.order[sw.front]] <= el - SWEEP_BAND / 2; sw.front++) {
+    const c = cells[sw.order[sw.front]];
+    if (isPaint(c.abs) && !sw.turned[c.i]) turn(c);
+  }
+  for (; sw.freeze < sw.order.length && sw.tau[sw.order[sw.freeze]] < el - SWEEP_BAND / 2 + freezeBy; sw.freeze++) {
+    const c = cells[sw.order[sw.freeze]];
+    if (isPaint(c.abs) && !sw.turned[c.i]) freeze(c);
+  }
+  // When the maps have moved on: ahead of the freeze the old colours drift on, behind the front
+  // the new ones (and any switch that has become background since the front passed turns over).
+  if (fresh) {
+    for (const c of cells) {
+      if (!isPaint(c.abs)) continue;
+      const i = c.i;
+      const k = i * 3;
+      const x = (el - sw.tau[i]) / SWEEP_BAND;
+      if (!sw.turned[i]) {
+        if (x >= 0.5) {
+          turn(c);
+          continue;
+        }
+        if (sw.hold) continue; // (showing the old board's picture until the front)
+        if (sw.tau[i] < el - SWEEP_BAND / 2 + freezeBy) {
+          freeze(c);
+          continue;
+        }
+      }
+      if (c.anim || c.q.length) continue;
+      const m = sw.turned[i] ? sw.b : sw.srcs[sw.src[i]].map;
+      const r = m[k];
+      const g = m[k + 1];
+      const b = m[k + 2];
+      if ((r - c.r) ** 2 + (g - c.g) ** 2 + (b - c.b) ** 2 > th2) {
         c.r = r;
         c.g = g;
         c.b = b;
-        board.flip(c, paintFace(r, g, b), { dur: FLIP_DUR, gap: sw.gapTo, edgesIn: (c.ca ?? 1) < 1 ? 40 : 0 });
-        // Now that it shows the current colour, leave it a random way towards its next drift
-        // flip (as in steady drift), so they don't all come due again together.
-        staggerMemory(c, k, (ago ||= recentPast()));
-        continue;
+        // (Ahead of the freeze, drift flips are short and start before it arrives, so each lands
+        // before the front; behind the front they are the ordinary drift, so handing back to
+        // paintStep shows no seam.)
+        const ahead = sw.tau[i] + SWEEP_BAND / 2 - el - freezeBy;
+        board.flip(c, paintFace(r, g, b, sw.turned[i] ? S.ascii : !!sw.asciiOld[i]), sw.turned[i] ? { delay: rand() * 500, dur: 440 + rand() * 240 } : { delay: rand() * Math.min(250, ahead), dur: 320 + rand() * 120 });
       }
-      // An unseen freeze runs SWEEP_FREEZE ms ahead of the front: once it has passed, no drift
-      // flip starts (one still waiting is dropped, one in motion is hurried to land in time), so
-      // every switch is free to turn over the moment the front arrives.
-      const toFront = sw.tau[i] + SWEEP_BAND / 2 - el;
-      if (sw.hold) continue; // (showing the old board's picture until the front)
-      if (x > 0 || toFront < SWEEP_FREEZE * board.durScale) {
-        if (!sw.frozen[i]) {
-          sw.frozen[i] = 1;
-          board.dropQueue(c);
-          board.hurry(c, Math.max(60, toFront - 30));
-        }
-        continue;
-      }
-    }
-    // Ahead of the freeze the old colours drift on, behind the front the new ones (looked at
-    // when the maps have moved on: in between they say the same).
-    if (!fresh || c.anim || c.q.length) continue;
-    const m = sw.turned[i] ? sw.b : sw.srcs[sw.src[i]].map;
-    const r = m[k];
-    const g = m[k + 1];
-    const b = m[k + 2];
-    if ((r - c.r) ** 2 + (g - c.g) ** 2 + (b - c.b) ** 2 > th2) {
-      c.r = r;
-      c.g = g;
-      c.b = b;
-      // (Ahead of the freeze, drift flips are short and start before it arrives, so each lands
-      // before the front; behind the front they are the ordinary drift, so handing back to
-      // paintStep shows no seam.)
-      const ahead = sw.tau[i] + SWEEP_BAND / 2 - el - SWEEP_FREEZE * board.durScale;
-      board.flip(c, paintFace(r, g, b, sw.turned[i] ? S.ascii : !!sw.asciiOld[i]), sw.turned[i] ? { delay: rand() * 500, dur: 440 + rand() * 240 } : { delay: rand() * Math.min(250, ahead), dur: 320 + rand() * 120 });
     }
   }
   if (el > sw.end) {
@@ -2422,11 +2472,9 @@ function loop(now) {
   if (S.lastNow) S.pt += (Math.min(now - S.lastNow, 250) / 1000) * SPEED;
   S.lastNow = now;
   paint.tick(now, S.pt, S.lite ? (S.sweep ? 600 : stepMs()) : 100);
-  if (!reduce.matches && !S.settling && now - S.lastStep >= stepMs()) paintStep(now);
-  if (S.sweep && now - (S.sweepAt || 0) >= (S.lite ? 70 : 34)) {
-    S.sweepAt = now;
-    sweepStep(now);
-  }
+  if (!reduce.matches && !S.settling) driftStep(now);
+  else S.lastStep = now;
+  if (S.sweep) sweepStep(now);
   watchFrames(now);
   const b = S.brush;
   if (b && b.painting && b.last >= 0 && now - b.lastSplash >= RESPLASH_MS) {
